@@ -58,6 +58,10 @@ nav {
     gap: 14px;
 }
 
+.nav-toggle {
+    display: none;
+}
+
 .page {
     margin: 0 auto;
     max-width: 1180px;
@@ -346,10 +350,40 @@ select {
 }
 
 @media (max-width: 760px) {
-    .site-header,
+    .site-header {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 12px;
+    }
+
     .hero-panel {
         align-items: flex-start;
         flex-direction: column;
+    }
+
+    .nav-toggle {
+        align-items: center;
+        background: var(--mist);
+        color: var(--ink);
+        display: inline-flex;
+        gap: 8px;
+        padding: 8px 12px;
+    }
+
+    .nav-toggle-icon {
+        font-size: 1.2rem;
+        line-height: 1;
+    }
+
+    nav {
+        display: none;
+        flex-direction: column;
+        gap: 10px;
+        width: 100%;
+    }
+
+    nav.is-open {
+        display: flex;
     }
 
     .two-column,

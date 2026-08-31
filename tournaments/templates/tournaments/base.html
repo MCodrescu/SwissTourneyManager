@@ -11,7 +11,11 @@
     <header class="site-header">
         <a class="brand" href="{% url 'tournaments:tournament_list' %}">Swiss Tourney Manager</a>
         {% if tournament %}
-            <nav>
+            <button class="nav-toggle" type="button" aria-controls="tournament-navigation" aria-expanded="false">
+                <span class="nav-toggle-icon" aria-hidden="true">&#9776;</span>
+                <span class="nav-toggle-label">Menu</span>
+            </button>
+            <nav id="tournament-navigation">
                 <a href="{% url 'tournaments:tournament_list' %}">Tournaments</a>
                 <a href="{% url 'tournaments:tournament_detail' tournament.id %}">Overview</a>
                 <a href="{% url 'tournaments:player_list' tournament.id %}">Players</a>
@@ -42,6 +46,16 @@
             window.setTimeout(function () {
                 message.remove();
             }, 3000);
+        });
+
+        document.querySelectorAll('.nav-toggle').forEach(function (toggle) {
+            toggle.addEventListener('click', function () {
+                var navigation = document.getElementById(toggle.getAttribute('aria-controls'));
+                var isExpanded = toggle.getAttribute('aria-expanded') === 'true';
+
+                toggle.setAttribute('aria-expanded', String(!isExpanded));
+                navigation.classList.toggle('is-open', !isExpanded);
+            });
         });
     </script>
 </body>
