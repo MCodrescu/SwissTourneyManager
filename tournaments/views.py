@@ -14,23 +14,39 @@ PLAYER_LIST_ROUTE = 'tournaments:player_list'
 ROUND_DETAIL_ROUTE = 'tournaments:round_detail'
 
 
+def _workspace_key(request):
+	if not request.session.session_key:
+		request.session.create()
+	return request.session.session_key
+
+
+def _workspace_tournament(request, tournament_id):
+	return get_object_or_404(
+		Tournament,
+		id=tournament_id,
+		workspace_key=_workspace_key(request),
+	)
+
+
 @require_GET
 def tournament_list(request):
-	tournaments = Tournament.objects.all()
+	tournaments = Tournament.objects.filter(workspace_key=_workspace_key(request))
 	return render(request, 'tournaments/tournament_list.html', {'tournaments': tournaments})
 
 
 def tournament_create(request):
 	form = TournamentForm(request.POST or None)
 	if request.method == 'POST' and form.is_valid():
-		tournament = form.save()
+		tournament = form.save(commit=False)
+		tournament.workspace_key = _workspace_key(request)
+		tournament.save()
 		return redirect(PLAYER_LIST_ROUTE, tournament_id=tournament.id)
 	return render(request, 'tournaments/form.html', {'form': form, 'title': 'New tournament'})
 
 
 @require_POST
 def tournament_delete(request, tournament_id):
-	tournament = get_object_or_404(Tournament, id=tournament_id)
+	tournament = _workspace_tournament(request, tournament_id)
 	tournament_name = tournament.name
 	tournament.delete()
 	messages.success(request, f'{tournament_name} deleted.')
@@ -39,7 +55,7 @@ def tournament_delete(request, tournament_id):
 
 @require_GET
 def tournament_detail(request, tournament_id):
-	tournament = get_object_or_404(Tournament, id=tournament_id)
+	tournament = _workspace_tournament(request, tournament_id)
 	rounds = tournament.rounds.prefetch_related('pairings')
 	standings = calculate_standings(tournament)
 	rounds_remaining = max(tournament.num_rounds - tournament.current_round, 0)
@@ -61,7 +77,7 @@ def tournament_detail(request, tournament_id):
 
 
 def player_list(request, tournament_id):
-	tournament = get_object_or_404(Tournament, id=tournament_id)
+	tournament = _workspace_tournament(request, tournament_id)
 	players = tournament.players.all()
 	active_player_count = players.filter(is_withdrawn=False).count()
 	tournament_started = tournament.current_round > 0
@@ -86,7 +102,7 @@ def player_list(request, tournament_id):
 
 
 def player_edit(request, tournament_id, player_id):
-	tournament = get_object_or_404(Tournament, id=tournament_id)
+	tournament = _workspace_tournament(request, tournament_id)
 	player = get_object_or_404(Player, id=player_id, tournament=tournament)
 	form = PlayerForm(request.POST or None, instance=player)
 	if request.method == 'POST' and form.is_valid():
@@ -97,7 +113,7 @@ def player_edit(request, tournament_id, player_id):
 
 @require_POST
 def player_withdraw(request, tournament_id, player_id):
-	tournament = get_object_or_404(Tournament, id=tournament_id)
+	tournament = _workspace_tournament(request, tournament_id)
 	player = get_object_or_404(Player, id=player_id, tournament=tournament)
 	player.withdraw()
 	messages.info(request, f'{player.name} withdrawn from future pairings.')
@@ -106,7 +122,7 @@ def player_withdraw(request, tournament_id, player_id):
 
 @require_POST
 def complete_tournament(request, tournament_id):
-	tournament = get_object_or_404(Tournament, id=tournament_id)
+	tournament = _workspace_tournament(request, tournament_id)
 	all_rounds_complete = (
 		tournament.current_round == tournament.num_rounds
 		and tournament.rounds.count() == tournament.num_rounds
@@ -124,7 +140,7 @@ def complete_tournament(request, tournament_id):
 
 @require_POST
 def generate_round(request, tournament_id):
-	tournament = get_object_or_404(Tournament, id=tournament_id)
+	tournament = _workspace_tournament(request, tournament_id)
 	if tournament.current_round >= tournament.num_rounds:
 		messages.error(request, 'This tournament has already reached its scheduled round count.')
 		return redirect('tournaments:tournament_detail', tournament_id=tournament.id)
@@ -142,7 +158,10 @@ def generate_round(request, tournament_id):
 	try:
 		with transaction.atomic():
 			# lock the row so a concurrent request can't generate a duplicate round
-			tournament = Tournament.objects.select_for_update().get(id=tournament_id)
+			tournament = Tournament.objects.select_for_update().get(
+				id=tournament_id,
+				workspace_key=_workspace_key(request),
+			)
 			if tournament.current_round >= tournament.num_rounds:
 				messages.error(request, 'This tournament has already reached its scheduled round count.')
 				return redirect('tournaments:tournament_detail', tournament_id=tournament.id)
@@ -178,7 +197,7 @@ def generate_round(request, tournament_id):
 
 
 def round_detail(request, tournament_id, round_id):
-	tournament = get_object_or_404(Tournament, id=tournament_id)
+	tournament = _workspace_tournament(request, tournament_id)
 	round_obj = get_object_or_404(Round.objects.prefetch_related('pairings'), id=round_id, tournament=tournament)
 	editable_pairings = round_obj.pairings.exclude(result=Pairing.ResultChoices.BYE)
 	result_formset = modelformset_factory(Pairing, form=PairingResultForm, extra=0)
@@ -197,9 +216,17 @@ def round_detail(request, tournament_id, round_id):
 	return render(request, 'tournaments/round_detail.html', {'tournament': tournament, 'round': round_obj, 'formset': formset})
 @require_GET
 def standings_view(request, tournament_id):
-	tournament = get_object_or_404(Tournament, id=tournament_id)
+	tournament = _workspace_tournament(request, tournament_id)
 	standings = calculate_standings(tournament)
 	return render(request, 'tournaments/standings.html', {'tournament': tournament, 'standings': standings})
+
+
+@require_POST
+def workspace_reset(request):
+	Tournament.objects.filter(workspace_key=_workspace_key(request)).delete()
+	request.session.flush()
+	messages.success(request, 'Your workspace has been cleared.')
+	return redirect('tournaments:tournament_list')
 
 
 def _player_card(player, tournament):

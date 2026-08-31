@@ -6,7 +6,15 @@
         <p class="eyebrow">Director console</p>
         <h1>Tournaments</h1>
     </div>
-    <a class="button primary" href="{% url 'tournaments:tournament_create' %}">New tournament</a>
+    <div class="actions">
+        {% if tournaments %}
+            <form method="post" action="{% url 'tournaments:workspace_reset' %}">
+                {% csrf_token %}
+                <button class="link-button" type="submit">Start over</button>
+            </form>
+        {% endif %}
+        <a class="button primary" href="{% url 'tournaments:tournament_create' %}">New tournament</a>
+    </div>
 </section>
 
 <section class="panel">

@@ -1,4 +1,7 @@
+from django.contrib.sessions.models import Session
+from django.core.management import call_command
 from django.test import TestCase
+from django.utils import timezone
 
 from .models import Pairing, Player, Round, Tournament
 from .pairing import PlayerCard, generate_pairings, validate_no_duplicate_players
@@ -80,8 +83,17 @@ class StandingsTests(TestCase):
 
 
 class DirectorFlowTests(TestCase):
+	def setUp(self):
+		session = self.client.session
+		session['workspace_initialized'] = True
+		session.save()
+		self.workspace_key = session.session_key
+
+	def create_tournament(self, **kwargs):
+		return Tournament.objects.create(workspace_key=self.workspace_key, **kwargs)
+
 	def test_tournament_can_be_deleted_from_list(self):
-		tournament = Tournament.objects.create(name='Saturday Swiss')
+		tournament = self.create_tournament(name='Saturday Swiss')
 
 		response = self.client.post(f'/tournament/{tournament.id}/delete/')
 
@@ -89,7 +101,7 @@ class DirectorFlowTests(TestCase):
 		self.assertFalse(Tournament.objects.filter(id=tournament.id).exists())
 
 	def test_overview_shows_completed_round_progress(self):
-		tournament = Tournament.objects.create(name='Saturday Swiss', num_rounds=3, current_round=1)
+		tournament = self.create_tournament(name='Saturday Swiss', num_rounds=3, current_round=1)
 		Round.objects.create(tournament=tournament, round_number=1, is_completed=True)
 
 		response = self.client.get(f'/tournament/{tournament.id}/')
@@ -97,7 +109,7 @@ class DirectorFlowTests(TestCase):
 		self.assertContains(response, '1 of 3 rounds completed')
 
 	def test_overview_labels_incomplete_round_as_in_progress(self):
-		tournament = Tournament.objects.create(name='Saturday Swiss', current_round=1)
+		tournament = self.create_tournament(name='Saturday Swiss', current_round=1)
 		Round.objects.create(tournament=tournament, round_number=1)
 
 		response = self.client.get(f'/tournament/{tournament.id}/')
@@ -105,7 +117,7 @@ class DirectorFlowTests(TestCase):
 		self.assertContains(response, 'Round 1 - in progress')
 
 	def test_overview_shows_completion_status_after_final_round(self):
-		tournament = Tournament.objects.create(name='Saturday Swiss', num_rounds=1, current_round=1)
+		tournament = self.create_tournament(name='Saturday Swiss', num_rounds=1, current_round=1)
 		Round.objects.create(tournament=tournament, round_number=1, is_completed=True)
 
 		response = self.client.get(f'/tournament/{tournament.id}/')
@@ -120,7 +132,7 @@ class DirectorFlowTests(TestCase):
 		self.assertContains(response, '<strong>Tournament Completed</strong>', html=True)
 
 	def test_overview_labels_first_round_action_as_start_tournament(self):
-		tournament = Tournament.objects.create(name='Saturday Swiss')
+		tournament = self.create_tournament(name='Saturday Swiss')
 
 		response = self.client.get(f'/tournament/{tournament.id}/')
 
@@ -128,7 +140,7 @@ class DirectorFlowTests(TestCase):
 		self.assertNotContains(response, 'Generate next round')
 
 	def test_players_page_starts_tournament_and_opens_first_round(self):
-		tournament = Tournament.objects.create(name='Saturday Swiss')
+		tournament = self.create_tournament(name='Saturday Swiss')
 		Player.objects.create(tournament=tournament, name='Alice')
 		Player.objects.create(tournament=tournament, name='Bob')
 
@@ -147,7 +159,7 @@ class DirectorFlowTests(TestCase):
 		self.assertContains(response, 'Tournament started. Round 1 pairings are ready.')
 
 	def test_players_page_disables_start_with_fewer_than_two_active_players(self):
-		tournament = Tournament.objects.create(name='Saturday Swiss')
+		tournament = self.create_tournament(name='Saturday Swiss')
 		Player.objects.create(tournament=tournament, name='Alice')
 
 		response = self.client.get(f'/tournament/{tournament.id}/players/')
@@ -155,7 +167,7 @@ class DirectorFlowTests(TestCase):
 		self.assertContains(response, '<button class="button primary" type="submit" disabled>Start tournament</button>', html=True)
 
 	def test_players_page_blocks_adding_players_after_tournament_starts(self):
-		tournament = Tournament.objects.create(name='Saturday Swiss', current_round=1)
+		tournament = self.create_tournament(name='Saturday Swiss', current_round=1)
 		Player.objects.create(tournament=tournament, name='Alice')
 		Round.objects.create(tournament=tournament, round_number=1)
 
@@ -178,7 +190,7 @@ class DirectorFlowTests(TestCase):
 		self.assertTrue(pairing.is_forfeit)
 
 	def test_completed_tournament_can_be_closed(self):
-		tournament = Tournament.objects.create(name='Saturday Swiss', num_rounds=1, current_round=1)
+		tournament = self.create_tournament(name='Saturday Swiss', num_rounds=1, current_round=1)
 		Round.objects.create(tournament=tournament, round_number=1, is_completed=True)
 
 		response = self.client.get(f'/tournament/{tournament.id}/')
@@ -190,7 +202,7 @@ class DirectorFlowTests(TestCase):
 		self.assertFalse(tournament.is_active)
 
 	def test_generate_round_enter_results_and_complete_round(self):
-		tournament = Tournament.objects.create(name='Saturday Swiss', num_rounds=3)
+		tournament = self.create_tournament(name='Saturday Swiss', num_rounds=3)
 		for name in ['Alice', 'Bob', 'Cara', 'Dan']:
 			Player.objects.create(tournament=tournament, name=name)
 
@@ -219,3 +231,59 @@ class DirectorFlowTests(TestCase):
 
 		round_obj.refresh_from_db()
 		self.assertTrue(round_obj.is_completed)
+
+	def test_tournament_is_invisible_to_a_different_browser_session(self):
+		tournament = self.create_tournament(name='Private Swiss')
+		other_client = self.client_class()
+
+		response = other_client.get('/')
+		self.assertNotContains(response, tournament.name)
+
+		response = other_client.get(f'/tournament/{tournament.id}/')
+		self.assertEqual(response.status_code, 404)
+
+	def test_start_over_clears_only_the_current_workspace(self):
+		tournament = self.create_tournament(name='Private Swiss')
+		other_client = self.client_class()
+		other_session = other_client.session
+		other_session['workspace_initialized'] = True
+		other_session.save()
+		other_tournament = Tournament.objects.create(
+			workspace_key=other_session.session_key,
+			name='Other Swiss',
+		)
+
+		response = self.client.post('/reset/')
+
+		self.assertRedirects(response, '/')
+		self.assertFalse(Tournament.objects.filter(id=tournament.id).exists())
+		self.assertTrue(Tournament.objects.filter(id=other_tournament.id).exists())
+
+
+class WorkspaceCleanupTests(TestCase):
+	def test_cleanup_removes_expired_workspace_only(self):
+		expired_session = Session.objects.create(
+			session_key='expired-workspace-key',
+			session_data='',
+			expire_date=timezone.now() - timezone.timedelta(days=1),
+		)
+		active_session = Session.objects.create(
+			session_key='active-workspace-key',
+			session_data='',
+			expire_date=timezone.now() + timezone.timedelta(days=1),
+		)
+		expired_tournament = Tournament.objects.create(
+			workspace_key=expired_session.session_key,
+			name='Expired Swiss',
+		)
+		active_tournament = Tournament.objects.create(
+			workspace_key=active_session.session_key,
+			name='Active Swiss',
+		)
+
+		call_command('purge_expired_workspaces')
+
+		self.assertFalse(Tournament.objects.filter(id=expired_tournament.id).exists())
+		self.assertTrue(Tournament.objects.filter(id=active_tournament.id).exists())
+		self.assertFalse(Session.objects.filter(session_key=expired_session.session_key).exists())
+		self.assertTrue(Session.objects.filter(session_key=active_session.session_key).exists())

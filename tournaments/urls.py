@@ -7,6 +7,7 @@ app_name = 'tournaments'
 urlpatterns = [
     path('', views.tournament_list, name='tournament_list'),
     path('new/', views.tournament_create, name='tournament_create'),
+	path('reset/', views.workspace_reset, name='workspace_reset'),
     path('tournament/<int:tournament_id>/delete/', views.tournament_delete, name='tournament_delete'),
     path('tournament/<int:tournament_id>/', views.tournament_detail, name='tournament_detail'),
     path('tournament/<int:tournament_id>/players/', views.player_list, name='player_list'),

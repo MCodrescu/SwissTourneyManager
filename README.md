@@ -17,6 +17,7 @@ Open http://127.0.0.1:8000/.
 ## Features
 
 - Create tournaments with a manually selected round count.
+- Give each browser session a private, temporary tournament workspace with no account required.
 - Add and edit players with optional initial ratings.
 - Withdraw players from future rounds without deleting historical pairings.
 - Generate simplified Swiss pairings by score group while avoiding rematches when possible.
@@ -55,6 +56,18 @@ Environment variables:
 ## SQLite on App Platform
 
 The app uses Django's default SQLite database. On DigitalOcean App Platform this database should be treated as ephemeral: data can reset on redeploys, restarts, or container replacement. That tradeoff is intentional for this v1 local-director use case. Use a managed PostgreSQL database later if tournament data must survive deployments.
+
+## Anonymous Workspaces
+
+Each browser session starts with an empty, private tournament list. A visitor can access only tournaments created in that same browser session; direct links to another visitor's tournament return `404`. Multiple tabs in one browser profile share a workspace. Use **Start over** from the tournament list to delete the current workspace immediately.
+
+Browser sessions expire when the browser closes. The server removes expired session data and its tournaments when this command runs:
+
+```sh
+python manage.py purge_expired_workspaces
+```
+
+Schedule that command at least daily in a public deployment. Run it instead of `python manage.py clearsessions`, because it removes the associated tournament data before deleting expired session records.
 
 ## Verification
 

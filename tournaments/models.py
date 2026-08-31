@@ -4,6 +4,7 @@ from django.utils import timezone
 
 
 class Tournament(models.Model):
+	workspace_key = models.CharField(max_length=40, db_index=True)
 	name = models.CharField(max_length=200)
 	num_rounds = models.PositiveIntegerField(default=4, validators=[MinValueValidator(1)])
 	current_round = models.PositiveIntegerField(default=0)
