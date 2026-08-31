@@ -1,7 +1,7 @@
 {% extends 'tournaments/base.html' %}
 {% block title %}{{ title }}{% endblock %}
 {% block content %}
-<section class="panel narrow">
+<section class="panel narrow form-panel">
     <h1>{{ title }}</h1>
     <form method="post" class="stacked-form">
         {% csrf_token %}

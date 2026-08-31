@@ -4,7 +4,11 @@
 <section class="hero-panel">
     <div>
         <p class="eyebrow">Round {{ tournament.current_round }} of {{ tournament.num_rounds }}</p>
-        <p>{{ rounds_remaining }} round{{ rounds_remaining|pluralize }} remaining</p>
+        {% if not tournament.is_active %}
+            <p><strong>Tournament Completed</strong></p>
+        {% else %}
+            <p>{{ completed_round_count }} of {{ tournament.num_rounds }} rounds completed</p>
+        {% endif %}
         <h1>{{ tournament.name }}</h1>
     </div>
     {% if can_complete_tournament %}
@@ -26,7 +30,7 @@
         {% if rounds %}
             <div class="round-list">
                 {% for round in rounds %}
-                    <a href="{% url 'tournaments:round_detail' tournament.id round.id %}">Round {{ round.round_number }}{% if round.is_completed %} - completed{% endif %}</a>
+                    <a href="{% url 'tournaments:round_detail' tournament.id round.id %}">Round {{ round.round_number }}{% if round.is_completed %} - completed{% else %} - in progress{% endif %}</a>
                 {% endfor %}
             </div>
         {% else %}

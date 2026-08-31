@@ -19,7 +19,7 @@ class PairingEngineTests(TestCase):
 		players = [
 			PlayerCard(id=1, name='Top', score=2),
 			PlayerCard(id=2, name='Middle', score=1),
-			PlayerCard(id=3, name='Low Prior Bye', score=0, had_bye=True),
+			PlayerCard(id=3, name='Low Prior Bye', score=0, bye_count=1),
 			PlayerCard(id=4, name='Low', score=0),
 			PlayerCard(id=5, name='Bottom', score=0),
 		]
@@ -88,12 +88,36 @@ class DirectorFlowTests(TestCase):
 		self.assertRedirects(response, '/')
 		self.assertFalse(Tournament.objects.filter(id=tournament.id).exists())
 
-	def test_overview_shows_remaining_rounds(self):
+	def test_overview_shows_completed_round_progress(self):
 		tournament = Tournament.objects.create(name='Saturday Swiss', num_rounds=3, current_round=1)
+		Round.objects.create(tournament=tournament, round_number=1, is_completed=True)
 
 		response = self.client.get(f'/tournament/{tournament.id}/')
 
-		self.assertContains(response, '2 rounds remaining')
+		self.assertContains(response, '1 of 3 rounds completed')
+
+	def test_overview_labels_incomplete_round_as_in_progress(self):
+		tournament = Tournament.objects.create(name='Saturday Swiss', current_round=1)
+		Round.objects.create(tournament=tournament, round_number=1)
+
+		response = self.client.get(f'/tournament/{tournament.id}/')
+
+		self.assertContains(response, 'Round 1 - in progress')
+
+	def test_overview_shows_completion_status_after_final_round(self):
+		tournament = Tournament.objects.create(name='Saturday Swiss', num_rounds=1, current_round=1)
+		Round.objects.create(tournament=tournament, round_number=1, is_completed=True)
+
+		response = self.client.get(f'/tournament/{tournament.id}/')
+
+		self.assertContains(response, '1 of 1 rounds completed')
+		self.assertNotContains(response, 'Tournament Completed')
+
+		tournament.is_active = False
+		tournament.save(update_fields=['is_active'])
+		response = self.client.get(f'/tournament/{tournament.id}/')
+
+		self.assertContains(response, '<strong>Tournament Completed</strong>', html=True)
 
 	def test_overview_labels_first_round_action_as_start_tournament(self):
 		tournament = Tournament.objects.create(name='Saturday Swiss')
@@ -102,6 +126,56 @@ class DirectorFlowTests(TestCase):
 
 		self.assertContains(response, 'Start tournament')
 		self.assertNotContains(response, 'Generate next round')
+
+	def test_players_page_starts_tournament_and_opens_first_round(self):
+		tournament = Tournament.objects.create(name='Saturday Swiss')
+		Player.objects.create(tournament=tournament, name='Alice')
+		Player.objects.create(tournament=tournament, name='Bob')
+
+		response = self.client.get(f'/tournament/{tournament.id}/players/')
+		self.assertContains(response, 'Start tournament')
+
+		response = self.client.post(f'/tournament/{tournament.id}/rounds/generate/')
+		round_obj = tournament.rounds.get(round_number=1)
+		self.assertRedirects(
+			response,
+			f'/tournament/{tournament.id}/rounds/{round_obj.id}/',
+			fetch_redirect_response=False,
+		)
+
+		response = self.client.get(response.url)
+		self.assertContains(response, 'Tournament started. Round 1 pairings are ready.')
+
+	def test_players_page_disables_start_with_fewer_than_two_active_players(self):
+		tournament = Tournament.objects.create(name='Saturday Swiss')
+		Player.objects.create(tournament=tournament, name='Alice')
+
+		response = self.client.get(f'/tournament/{tournament.id}/players/')
+
+		self.assertContains(response, '<button class="button primary" type="submit" disabled>Start tournament</button>', html=True)
+
+	def test_players_page_blocks_adding_players_after_tournament_starts(self):
+		tournament = Tournament.objects.create(name='Saturday Swiss', current_round=1)
+		Player.objects.create(tournament=tournament, name='Alice')
+		Round.objects.create(tournament=tournament, round_number=1)
+
+		response = self.client.post(f'/tournament/{tournament.id}/players/', {'name': 'Late Player'})
+
+		self.assertRedirects(response, f'/tournament/{tournament.id}/players/')
+		self.assertFalse(Player.objects.filter(tournament=tournament, name='Late Player').exists())
+
+	def test_withdrawing_a_player_forfeits_their_pending_pairing(self):
+		tournament = Tournament.objects.create(name='Saturday Swiss', current_round=1)
+		alice = Player.objects.create(tournament=tournament, name='Alice')
+		bob = Player.objects.create(tournament=tournament, name='Bob')
+		round_one = Round.objects.create(tournament=tournament, round_number=1)
+		pairing = Pairing.objects.create(round=round_one, player_white=alice, player_black=bob)
+
+		alice.withdraw()
+
+		pairing.refresh_from_db()
+		self.assertEqual(pairing.result, Pairing.ResultChoices.BLACK_WIN)
+		self.assertTrue(pairing.is_forfeit)
 
 	def test_completed_tournament_can_be_closed(self):
 		tournament = Tournament.objects.create(name='Saturday Swiss', num_rounds=1, current_round=1)

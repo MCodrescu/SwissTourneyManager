@@ -9,7 +9,7 @@
 </section>
 
 <section class="panel">
-    <h2>Pairings and results</h2>
+    <h2>Board Pairings</h2>
     <form method="post" id="round-results-form">
         {% csrf_token %}
         {{ formset.management_form }}
@@ -18,7 +18,7 @@
                 <article class="pairing-row">
                     {{ form.id }}
                     <div class="board-label">Board {{ forloop.counter }}</div>
-                    <div class="board-players">{{ form.instance.player_white.name }} (W) <span>vs</span> {{ form.instance.player_black.name }} (B)</div>
+                    <div class="board-players">{{ form.instance.player_white.name }} (W) <span>vs</span> {{ form.instance.player_black.name }} (B){% if form.instance.is_forfeit %} <em>(forfeit — withdrawn player)</em>{% endif %}</div>
                     <div class="result-options">{{ form.result }}</div>
                 </article>
             {% endfor %}

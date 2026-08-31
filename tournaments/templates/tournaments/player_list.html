@@ -6,6 +6,12 @@
         <p class="eyebrow">{{ tournament.name }}</p>
         <h1>Players</h1>
     </div>
+    {% if tournament.is_active and tournament.current_round == 0 %}
+        <form method="post" action="{% url 'tournaments:generate_round' tournament.id %}">
+            {% csrf_token %}
+            <button class="button primary" type="submit" {% if active_player_count < 2 %}disabled{% endif %}>Start tournament</button>
+        </form>
+    {% endif %}
 </section>
 
 <div class="two-column wide-left">
@@ -43,11 +49,15 @@
     </section>
     <section class="panel">
         <h2>Add player</h2>
-        <form method="post" class="stacked-form">
-            {% csrf_token %}
-            {{ form.as_p }}
-            <button class="button primary" type="submit">Add</button>
-        </form>
+        {% if tournament_started %}
+            <p>Players can only be added before the tournament starts.</p>
+        {% else %}
+            <form method="post" class="stacked-form">
+                {% csrf_token %}
+                {{ form.as_p }}
+                <button class="button primary" type="submit">Add</button>
+            </form>
+        {% endif %}
     </section>
 </div>
 {% endblock %}

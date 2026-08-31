@@ -90,6 +90,11 @@ nav {
     max-width: 560px;
 }
 
+.form-panel h1 {
+    font-size: 2rem;
+    margin-bottom: 28px;
+}
+
 h1,
 h2,
 p {
@@ -191,18 +196,42 @@ select {
 }
 
 .messages {
-    margin-bottom: 18px;
+    display: grid;
+    gap: 10px;
+    left: 50%;
+    max-width: min(560px, calc(100vw - 32px));
+    position: fixed;
+    top: 18px;
+    transform: translateX(-50%);
+    width: 100%;
+    z-index: 1000;
 }
 
 .message {
+    align-items: center;
     background: var(--mist);
     border-left: 4px solid var(--forest);
     border-radius: 6px;
+    display: flex;
+    gap: 12px;
+    justify-content: space-between;
+    margin: 0;
     padding: 12px;
 }
 
 .message.error {
     border-color: var(--rust);
+}
+
+.message-dismiss {
+    background: transparent;
+    border: 0;
+    color: var(--ink);
+    cursor: pointer;
+    font: inherit;
+    font-size: 1.4rem;
+    line-height: 1;
+    padding: 0 2px;
 }
 
 .actions,

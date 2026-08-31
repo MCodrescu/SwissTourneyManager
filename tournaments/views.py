@@ -1,5 +1,5 @@
 from django.contrib import messages
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.forms import modelformset_factory
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -43,6 +43,7 @@ def tournament_detail(request, tournament_id):
 	rounds = tournament.rounds.prefetch_related('pairings')
 	standings = calculate_standings(tournament)
 	rounds_remaining = max(tournament.num_rounds - tournament.current_round, 0)
+	completed_round_count = rounds.filter(is_completed=True).count()
 	can_complete_tournament = (
 		tournament.is_active
 		and tournament.current_round == tournament.num_rounds
@@ -54,6 +55,7 @@ def tournament_detail(request, tournament_id):
 		'rounds': rounds,
 		'standings': standings,
 		'rounds_remaining': rounds_remaining,
+		'completed_round_count': completed_round_count,
 		'can_complete_tournament': can_complete_tournament,
 	})
 
@@ -61,14 +63,26 @@ def tournament_detail(request, tournament_id):
 def player_list(request, tournament_id):
 	tournament = get_object_or_404(Tournament, id=tournament_id)
 	players = tournament.players.all()
+	active_player_count = players.filter(is_withdrawn=False).count()
+	tournament_started = tournament.current_round > 0
 	form = PlayerForm(request.POST or None)
-	if request.method == 'POST' and form.is_valid():
-		player = form.save(commit=False)
-		player.tournament = tournament
-		player.save()
-		messages.success(request, f'Added {player.name}.')
-		return redirect(PLAYER_LIST_ROUTE, tournament_id=tournament.id)
-	return render(request, 'tournaments/player_list.html', {'tournament': tournament, 'players': players, 'form': form})
+	if request.method == 'POST':
+		if tournament_started:
+			messages.error(request, 'Players can only be added before the tournament starts.')
+			return redirect(PLAYER_LIST_ROUTE, tournament_id=tournament.id)
+		if form.is_valid():
+			player = form.save(commit=False)
+			player.tournament = tournament
+			player.save()
+			messages.success(request, f'Added {player.name}.')
+			return redirect(PLAYER_LIST_ROUTE, tournament_id=tournament.id)
+	return render(request, 'tournaments/player_list.html', {
+		'tournament': tournament,
+		'players': players,
+		'active_player_count': active_player_count,
+		'tournament_started': tournament_started,
+		'form': form,
+	})
 
 
 def player_edit(request, tournament_id, player_id):
@@ -125,26 +139,41 @@ def generate_round(request, tournament_id):
 		messages.error(request, 'Add at least two active players before generating pairings.')
 		return redirect(PLAYER_LIST_ROUTE, tournament_id=tournament.id)
 
-	with transaction.atomic():
-		round_number = tournament.current_round + 1
-		round_obj = Round.objects.create(tournament=tournament, round_number=round_number)
-		player_cards = [_player_card(player, tournament) for player in active_players]
-		cards = generate_pairings(player_cards)
-		players_by_id = {player.id: player for player in active_players}
+	try:
+		with transaction.atomic():
+			# lock the row so a concurrent request can't generate a duplicate round
+			tournament = Tournament.objects.select_for_update().get(id=tournament_id)
+			if tournament.current_round >= tournament.num_rounds:
+				messages.error(request, 'This tournament has already reached its scheduled round count.')
+				return redirect('tournaments:tournament_detail', tournament_id=tournament.id)
+			latest_round = tournament.rounds.order_by('-round_number').first()
+			if latest_round and not latest_round.is_completed:
+				messages.error(request, 'Complete the current round before generating another one.')
+				return redirect(ROUND_DETAIL_ROUTE, tournament_id=tournament.id, round_id=latest_round.id)
 
-		for card in cards:
-			if card.is_bye:
-				Pairing.objects.create(round=round_obj, bye_player=players_by_id[card.bye_id], result=Pairing.ResultChoices.BYE)
-			else:
-				Pairing.objects.create(
-					round=round_obj,
-					player_white=players_by_id[card.white_id],
-					player_black=players_by_id[card.black_id],
-				)
+			round_number = tournament.current_round + 1
+			round_obj = Round.objects.create(tournament=tournament, round_number=round_number)
+			player_cards = [_player_card(player, tournament) for player in active_players]
+			cards = generate_pairings(player_cards)
+			players_by_id = {player.id: player for player in active_players}
 
-		tournament.current_round = round_number
-		tournament.save(update_fields=['current_round'])
+			for card in cards:
+				if card.is_bye:
+					Pairing.objects.create(round=round_obj, bye_player=players_by_id[card.bye_id], result=Pairing.ResultChoices.BYE)
+				else:
+					Pairing.objects.create(
+						round=round_obj,
+						player_white=players_by_id[card.white_id],
+						player_black=players_by_id[card.black_id],
+					)
 
+			tournament.current_round = round_number
+			tournament.save(update_fields=['current_round'])
+	except IntegrityError:
+		messages.error(request, 'Another request already generated this round. Please refresh and try again.')
+		return redirect('tournaments:tournament_detail', tournament_id=tournament.id)
+
+	messages.success(request, 'Tournament started. Round 1 pairings are ready.')
 	return redirect(ROUND_DETAIL_ROUTE, tournament_id=tournament.id, round_id=round_obj.id)
 
 
@@ -182,13 +211,13 @@ def _player_card(player, tournament):
 	).select_related('player_white', 'player_black')
 	opponents = []
 	colors = []
-	had_bye = False
+	bye_count = 0
 	score = 0.0
 
 	for pairing in pairings:
 		score += pairing.score_for(player)
 		if pairing.result == Pairing.ResultChoices.BYE and pairing.bye_player_id == player.id:
-			had_bye = True
+			bye_count += 1
 			continue
 		opponent = pairing.opponent_for(player)
 		if opponent:
@@ -204,7 +233,7 @@ def _player_card(player, tournament):
 		score=score,
 		opponents=frozenset(opponents),
 		colors=tuple(colors),
-		had_bye=had_bye,
+		bye_count=bye_count,
 		initial_rating=player.initial_rating,
 	)
 

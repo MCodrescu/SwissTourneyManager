@@ -1,10 +1,11 @@
-from django.db import models
+from django.core.validators import MinValueValidator
+from django.db import models, transaction
 from django.utils import timezone
 
 
 class Tournament(models.Model):
 	name = models.CharField(max_length=200)
-	num_rounds = models.PositiveIntegerField(default=4)
+	num_rounds = models.PositiveIntegerField(default=4, validators=[MinValueValidator(1)])
 	current_round = models.PositiveIntegerField(default=0)
 	created_at = models.DateTimeField(auto_now_add=True)
 	is_active = models.BooleanField(default=True)
@@ -30,46 +31,25 @@ class Player(models.Model):
 	def __str__(self):
 		return self.name
 
-	def withdraw(self):
-		self.is_withdrawn = True
-		self.withdrawn_at_round = self.tournament.current_round + 1
-		self.save(update_fields=['is_withdrawn', 'withdrawn_at_round'])
-
-	def get_score(self):
-		score = 0.0
-		for pairing in self.pairings():
-			if pairing.result == Pairing.ResultChoices.BYE and pairing.bye_player_id == self.id:
-				score += 1.0
-			elif pairing.result == Pairing.ResultChoices.WHITE_WIN and pairing.player_white_id == self.id:
-				score += 1.0
-			elif pairing.result == Pairing.ResultChoices.BLACK_WIN and pairing.player_black_id == self.id:
-				score += 1.0
-			elif pairing.result == Pairing.ResultChoices.DRAW:
-				score += 0.5
-		return score
-
-	def get_opponents(self):
-		opponents = []
-		for pairing in self.pairings().select_related('player_white', 'player_black'):
-			opponent = pairing.opponent_for(self)
-			if opponent is not None:
-				opponents.append(opponent)
-		return opponents
-
-	def get_colors_played(self):
-		colors = []
-		for pairing in self.pairings():
-			if pairing.player_white_id == self.id:
-				colors.append('W')
-			elif pairing.player_black_id == self.id:
-				colors.append('B')
-		return colors
-
-	def pairings(self):
+	def pending_pairing(self):
 		return Pairing.objects.filter(
-			models.Q(player_white=self) | models.Q(player_black=self) | models.Q(bye_player=self),
-			result__in=Pairing.completed_results(),
-		).select_related('round').order_by('round__round_number')
+			models.Q(player_white=self) | models.Q(player_black=self),
+			round__tournament=self.tournament,
+			result=Pairing.ResultChoices.PENDING,
+		).select_related('round').order_by('-round__round_number').first()
+
+	def withdraw(self):
+		with transaction.atomic():
+			pending = self.pending_pairing()
+			if pending is not None:
+				# award the opponent a win since the withdrawn player can no longer finish this game
+				pending.result = Pairing.ResultChoices.BLACK_WIN if pending.player_white_id == self.id else Pairing.ResultChoices.WHITE_WIN
+				pending.is_forfeit = True
+				pending.save(update_fields=['result', 'is_forfeit'])
+
+			self.is_withdrawn = True
+			self.withdrawn_at_round = self.tournament.current_round + 1
+			self.save(update_fields=['is_withdrawn', 'withdrawn_at_round'])
 
 
 class Round(models.Model):
@@ -99,6 +79,7 @@ class Pairing(models.Model):
 	player_black = models.ForeignKey(Player, on_delete=models.CASCADE, related_name='black_pairings', blank=True, null=True)
 	bye_player = models.ForeignKey(Player, on_delete=models.CASCADE, related_name='bye_pairings', blank=True, null=True)
 	result = models.CharField(max_length=20, choices=ResultChoices.choices, default=ResultChoices.PENDING)
+	is_forfeit = models.BooleanField(default=False)
 
 	class Meta:
 		ordering = ['round__round_number', 'id']
