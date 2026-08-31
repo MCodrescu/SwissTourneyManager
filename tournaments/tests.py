@@ -1,6 +1,7 @@
 from django.contrib.sessions.models import Session
+from django.core.cache import cache
 from django.core.management import call_command
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from .models import Pairing, Player, Round, Tournament
@@ -287,3 +288,49 @@ class WorkspaceCleanupTests(TestCase):
 		self.assertTrue(Tournament.objects.filter(id=active_tournament.id).exists())
 		self.assertFalse(Session.objects.filter(session_key=expired_session.session_key).exists())
 		self.assertTrue(Session.objects.filter(session_key=active_session.session_key).exists())
+
+
+class WorkspaceLimitTests(TestCase):
+	def setUp(self):
+		cache.clear()
+		session = self.client.session
+		session['workspace_initialized'] = True
+		session.save()
+		self.workspace_key = session.session_key
+
+	@override_settings(WORKSPACE_SESSION_LIMIT=1)
+	def test_session_limit_rejects_new_workspace(self):
+		other_client = self.client_class()
+
+		response = other_client.get('/', REMOTE_ADDR='192.0.2.1')
+
+		self.assertEqual(response.status_code, 429)
+
+	@override_settings(WORKSPACE_TOURNAMENT_LIMIT=1)
+	def test_tournament_limit_rejects_new_tournament(self):
+		Tournament.objects.create(workspace_key=self.workspace_key, name='Existing Swiss')
+
+		response = self.client.post('/new/', {'name': 'One Too Many', 'num_rounds': 4})
+
+		self.assertEqual(response.status_code, 429)
+		self.assertFalse(Tournament.objects.filter(name='One Too Many').exists())
+
+	@override_settings(TOURNAMENT_PLAYER_LIMIT=1)
+	def test_player_limit_rejects_new_player(self):
+		tournament = Tournament.objects.create(workspace_key=self.workspace_key, name='Private Swiss')
+		Player.objects.create(tournament=tournament, name='Alice')
+
+		response = self.client.post(f'/tournament/{tournament.id}/players/', {'name': 'Bob'})
+
+		self.assertEqual(response.status_code, 429)
+		self.assertFalse(Player.objects.filter(tournament=tournament, name='Bob').exists())
+
+	@override_settings(WORKSPACE_REQUEST_LIMIT=1, WORKSPACE_REQUEST_WINDOW_SECONDS=60)
+	def test_request_limit_rejects_excess_requests(self):
+		response = self.client.get('/', REMOTE_ADDR='192.0.2.2')
+		self.assertEqual(response.status_code, 200)
+
+		response = self.client.get('/', REMOTE_ADDR='192.0.2.2')
+
+		self.assertEqual(response.status_code, 429)
+		self.assertEqual(response.headers['Retry-After'], '60')

@@ -1,6 +1,8 @@
 from django.contrib import messages
+from django.conf import settings
 from django.db import IntegrityError, transaction
 from django.forms import modelformset_factory
+from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views.decorators.http import require_GET, require_POST
@@ -37,8 +39,11 @@ def tournament_list(request):
 def tournament_create(request):
 	form = TournamentForm(request.POST or None)
 	if request.method == 'POST' and form.is_valid():
+		workspace_key = _workspace_key(request)
+		if Tournament.objects.filter(workspace_key=workspace_key).count() >= settings.WORKSPACE_TOURNAMENT_LIMIT:
+			return HttpResponse('This workspace has reached its tournament limit.', status=429)
 		tournament = form.save(commit=False)
-		tournament.workspace_key = _workspace_key(request)
+		tournament.workspace_key = workspace_key
 		tournament.save()
 		return redirect(PLAYER_LIST_ROUTE, tournament_id=tournament.id)
 	return render(request, 'tournaments/form.html', {'form': form, 'title': 'New tournament'})
@@ -87,6 +92,8 @@ def player_list(request, tournament_id):
 			messages.error(request, 'Players can only be added before the tournament starts.')
 			return redirect(PLAYER_LIST_ROUTE, tournament_id=tournament.id)
 		if form.is_valid():
+			if players.count() >= settings.TOURNAMENT_PLAYER_LIMIT:
+				return HttpResponse('This tournament has reached its player limit.', status=429)
 			player = form.save(commit=False)
 			player.tournament = tournament
 			player.save()

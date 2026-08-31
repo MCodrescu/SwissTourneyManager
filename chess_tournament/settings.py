@@ -45,6 +45,7 @@ MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
+	'tournaments.middleware.WorkspaceRateLimitMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
@@ -115,6 +116,14 @@ USE_I18N = True
 USE_TZ = True
 
 SESSION_EXPIRE_AT_BROWSER_CLOSE = True
+SESSION_COOKIE_AGE = int(os.environ.get('SESSION_COOKIE_AGE', 60 * 60 * 8))
+DATA_UPLOAD_MAX_MEMORY_SIZE = int(os.environ.get('DATA_UPLOAD_MAX_MEMORY_SIZE', 256 * 1024))
+WORKSPACE_SESSION_LIMIT = int(os.environ.get('WORKSPACE_SESSION_LIMIT', 500))
+WORKSPACE_TOURNAMENT_LIMIT = int(os.environ.get('WORKSPACE_TOURNAMENT_LIMIT', 5))
+TOURNAMENT_PLAYER_LIMIT = int(os.environ.get('TOURNAMENT_PLAYER_LIMIT', 200))
+TOURNAMENT_ROUND_LIMIT = int(os.environ.get('TOURNAMENT_ROUND_LIMIT', 15))
+WORKSPACE_REQUEST_LIMIT = int(os.environ.get('WORKSPACE_REQUEST_LIMIT', 120))
+WORKSPACE_REQUEST_WINDOW_SECONDS = int(os.environ.get('WORKSPACE_REQUEST_WINDOW_SECONDS', 60))
 
 
 # Static files (CSS, JavaScript, Images)

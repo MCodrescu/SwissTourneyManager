@@ -1,4 +1,5 @@
 from django import forms
+from django.conf import settings
 
 from .models import Pairing, Player, Tournament
 
@@ -7,6 +8,10 @@ class TournamentForm(forms.ModelForm):
     class Meta:
         model = Tournament
         fields = ['name', 'num_rounds']
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['num_rounds'].max_value = settings.TOURNAMENT_ROUND_LIMIT
 
 
 class PlayerForm(forms.ModelForm):

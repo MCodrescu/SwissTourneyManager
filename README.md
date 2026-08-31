@@ -25,7 +25,6 @@ Open http://127.0.0.1:8000/.
 - Prefer color assignments that reduce color imbalance.
 - Enter round results and block future round generation until the current round is complete.
 - Show standings sorted by score, then Sonneborn-Berger.
-- Use `/tournament/<id>/display/` for a projector-friendly standings display that refreshes every 15 seconds.
 
 ## Pairing limitations
 
@@ -44,7 +43,7 @@ pip install -r requirements.txt && python manage.py collectstatic --noinput
 Run command:
 
 ```sh
-gunicorn chess_tournament.wsgi --bind 0.0.0.0:8080
+gunicorn --worker-tmp-dir /dev/shm --workers 1 chess_tournament.wsgi:application --bind 0.0.0.0:${PORT:-8080}
 ```
 
 Environment variables:
@@ -69,6 +68,19 @@ python manage.py purge_expired_workspaces
 
 Schedule that command at least daily in a public deployment. Run it instead of `python manage.py clearsessions`, because it removes the associated tournament data before deleting expired session records.
 
+## Capacity Limits
+
+The app rejects excess traffic with HTTP `429 Too Many Requests`. Defaults can be changed with environment variables:
+
+- `WORKSPACE_SESSION_LIMIT=500` active browser workspaces.
+- `WORKSPACE_TOURNAMENT_LIMIT=5` tournaments per workspace.
+- `TOURNAMENT_PLAYER_LIMIT=200` players per tournament.
+- `TOURNAMENT_ROUND_LIMIT=15` rounds per tournament.
+- `WORKSPACE_REQUEST_LIMIT=120` requests per IP per `WORKSPACE_REQUEST_WINDOW_SECONDS=60` seconds.
+- `DATA_UPLOAD_MAX_MEMORY_SIZE=262144` maximum request body size in bytes.
+
+The included request limiter uses Django's local-memory cache. It is appropriate when running the single Gunicorn worker shown above; use an edge proxy or hosting-provider rate limiter for network-level denial-of-service protection.
+
 ## Verification
 
 ```powershell
@@ -76,3 +88,7 @@ python manage.py test
 python manage.py check
 python manage.py collectstatic --noinput
 ```
+
+## Development Note
+
+This project was generated with AI assistance under human guidance, review, and direction.
