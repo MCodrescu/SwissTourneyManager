@@ -1,0 +1,53 @@
+{% extends 'tournaments/base.html' %}
+{% block title %}Players - {{ tournament.name }}{% endblock %}
+{% block content %}
+<section class="hero-panel">
+    <div>
+        <p class="eyebrow">{{ tournament.name }}</p>
+        <h1>Players</h1>
+    </div>
+</section>
+
+<div class="two-column wide-left">
+    <section class="panel">
+        <h2>Roster</h2>
+        {% if players %}
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr><th>Name</th><th>Rating</th><th>Status</th><th></th></tr>
+                    </thead>
+                    <tbody>
+                        {% for player in players %}
+                            <tr class="{% if player.is_withdrawn %}muted{% endif %}">
+                                <td>{{ player.name }}</td>
+                                <td>{{ player.initial_rating|default:'-' }}</td>
+                                <td>{% if player.is_withdrawn %}Withdrawn{% else %}Active{% endif %}</td>
+                                <td class="actions">
+                                    <a href="{% url 'tournaments:player_edit' tournament.id player.id %}">Edit</a>
+                                    {% if not player.is_withdrawn %}
+                                        <form method="post" action="{% url 'tournaments:player_withdraw' tournament.id player.id %}">
+                                            {% csrf_token %}
+                                            <button type="submit" class="link-button">Withdraw</button>
+                                        </form>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <p>No players yet.</p>
+        {% endif %}
+    </section>
+    <section class="panel">
+        <h2>Add player</h2>
+        <form method="post" class="stacked-form">
+            {% csrf_token %}
+            {{ form.as_p }}
+            <button class="button primary" type="submit">Add</button>
+        </form>
+    </section>
+</div>
+{% endblock %}

@@ -1,0 +1,48 @@
+{% extends 'tournaments/base.html' %}
+{% block title %}Tournaments{% endblock %}
+{% block content %}
+<section class="hero-panel">
+    <div>
+        <p class="eyebrow">Director console</p>
+        <h1>Tournaments</h1>
+    </div>
+    <a class="button primary" href="{% url 'tournaments:tournament_create' %}">New tournament</a>
+</section>
+
+<section class="panel">
+    {% if tournaments %}
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Round</th>
+                        <th>Status</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for tournament in tournaments %}
+                        <tr>
+                            <td>{{ tournament.name }}</td>
+                            <td>{{ tournament.current_round }} / {{ tournament.num_rounds }}</td>
+                            <td>{% if tournament.is_active %}Active{% else %}Closed{% endif %}</td>
+                            <td>
+                                <div class="actions">
+                                    <a href="{% url 'tournaments:tournament_detail' tournament.id %}">Open</a>
+                                    <form method="post" action="{% url 'tournaments:tournament_delete' tournament.id %}">
+                                        {% csrf_token %}
+                                        <button class="link-button" type="submit">Delete</button>
+                                    </form>
+                                </div>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% else %}
+        <p>No tournaments yet.</p>
+    {% endif %}
+</section>
+{% endblock %}

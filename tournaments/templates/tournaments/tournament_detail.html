@@ -1,0 +1,50 @@
+{% extends 'tournaments/base.html' %}
+{% block title %}{{ tournament.name }}{% endblock %}
+{% block content %}
+<section class="hero-panel">
+    <div>
+        <p class="eyebrow">Round {{ tournament.current_round }} of {{ tournament.num_rounds }}</p>
+        <p>{{ rounds_remaining }} round{{ rounds_remaining|pluralize }} remaining</p>
+        <h1>{{ tournament.name }}</h1>
+    </div>
+    {% if can_complete_tournament %}
+        <form method="post" action="{% url 'tournaments:complete_tournament' tournament.id %}">
+            {% csrf_token %}
+            <button class="button primary" type="submit">Complete tournament</button>
+        </form>
+    {% elif tournament.is_active %}
+        <form method="post" action="{% url 'tournaments:generate_round' tournament.id %}">
+            {% csrf_token %}
+            <button class="button primary" type="submit">{% if tournament.current_round == 0 %}Start tournament{% else %}Generate next round{% endif %}</button>
+        </form>
+    {% endif %}
+</section>
+
+<div class="two-column">
+    <section class="panel">
+        <h2>Rounds</h2>
+        {% if rounds %}
+            <div class="round-list">
+                {% for round in rounds %}
+                    <a href="{% url 'tournaments:round_detail' tournament.id round.id %}">Round {{ round.round_number }}{% if round.is_completed %} - completed{% endif %}</a>
+                {% endfor %}
+            </div>
+        {% else %}
+            <p>No rounds generated yet.</p>
+        {% endif %}
+    </section>
+    <section class="panel">
+        <h2>Top standings</h2>
+        {% if standings %}
+            <ol class="standings-preview">
+                {% for row in standings|slice:':5' %}
+                    <li><span>{{ row.player.name }}</span><strong>{{ row.score|floatformat:1 }}</strong></li>
+                {% endfor %}
+            </ol>
+            <a href="{% url 'tournaments:standings' tournament.id %}">Full standings</a>
+        {% else %}
+            <p>Add players to begin.</p>
+        {% endif %}
+    </section>
+</div>
+{% endblock %}

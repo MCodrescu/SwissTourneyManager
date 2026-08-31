@@ -1,0 +1,36 @@
+{% extends 'tournaments/base.html' %}
+{% block title %}Standings - {{ tournament.name }}{% endblock %}
+{% block content %}
+<section class="hero-panel">
+    <div>
+        <p class="eyebrow">{{ tournament.name }}</p>
+        <h1>Standings</h1>
+    </div>
+</section>
+
+<section class="panel">
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr><th>Rank</th><th>Name</th><th>Score</th><th>SB</th><th>Games</th><th>W</th><th>D</th><th>L</th><th>Byes</th><th>Colors</th></tr>
+            </thead>
+            <tbody>
+                {% for row in standings %}
+                    <tr>
+                        <td>{{ forloop.counter }}</td>
+                        <td>{{ row.player.name }}</td>
+                        <td>{{ row.score|floatformat:1 }}</td>
+                        <td>{{ row.sonneborn_berger|floatformat:2 }}</td>
+                        <td>{{ row.games_played }}</td>
+                        <td>{{ row.wins }}</td>
+                        <td>{{ row.draws }}</td>
+                        <td>{{ row.losses }}</td>
+                        <td>{{ row.byes }}</td>
+                        <td>{{ row.color_history|join:''|default:'-' }}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}

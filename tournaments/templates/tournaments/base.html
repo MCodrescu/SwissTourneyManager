@@ -1,0 +1,33 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}Swiss Tourney Manager{% endblock %}</title>
+    <link rel="stylesheet" href="{% static 'tournaments/site.css' %}">
+</head>
+<body>
+    <header class="site-header">
+        <a class="brand" href="{% url 'tournaments:tournament_list' %}">Swiss Tourney Manager</a>
+        {% if tournament %}
+            <nav>
+                <a href="{% url 'tournaments:tournament_list' %}">Tournaments</a>
+                <a href="{% url 'tournaments:tournament_detail' tournament.id %}">Overview</a>
+                <a href="{% url 'tournaments:player_list' tournament.id %}">Players</a>
+                <a href="{% url 'tournaments:standings' tournament.id %}">Standings</a>
+            </nav>
+        {% endif %}
+    </header>
+    <main class="page">
+        {% if messages %}
+            <div class="messages">
+                {% for message in messages %}
+                    <p class="message {{ message.tags }}">{{ message }}</p>
+                {% endfor %}
+            </div>
+        {% endif %}
+        {% block content %}{% endblock %}
+    </main>
+</body>
+</html>

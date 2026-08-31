@@ -1,0 +1,55 @@
+{% extends 'tournaments/base.html' %}
+{% block title %}Round {{ round.round_number }} - {{ tournament.name }}{% endblock %}
+{% block content %}
+<section class="hero-panel">
+    <div>
+        <p class="eyebrow">{{ tournament.name }}</p>
+        <h1>Round {{ round.round_number }}</h1>
+    </div>
+</section>
+
+<section class="panel">
+    <h2>Pairings and results</h2>
+    <form method="post" id="round-results-form">
+        {% csrf_token %}
+        {{ formset.management_form }}
+        <div class="pairing-list">
+            {% for form in formset %}
+                <article class="pairing-row">
+                    {{ form.id }}
+                    <div class="board-label">Board {{ forloop.counter }}</div>
+                    <div class="board-players">{{ form.instance.player_white.name }} (W) <span>vs</span> {{ form.instance.player_black.name }} (B)</div>
+                    <div class="result-options">{{ form.result }}</div>
+                </article>
+            {% endfor %}
+            {% for pairing in round.pairings.all %}
+                {% if pairing.bye_player_id %}
+                    <article class="pairing-row bye-row">
+                        <div class="board-label">Bye</div>
+                        <div class="board-players">{{ pairing.bye_player.name }}</div>
+                        <div class="result-options">Full point</div>
+                    </article>
+                {% endif %}
+            {% endfor %}
+        </div>
+        {% if not round.is_completed %}
+            <button class="button primary" id="complete-round-button" type="submit" disabled>Complete round</button>
+        {% endif %}
+    </form>
+</section>
+{% if not round.is_completed %}
+<script>
+    const resultsForm = document.querySelector('#round-results-form');
+    const completeButton = document.querySelector('#complete-round-button');
+    const resultGroups = [...resultsForm.querySelectorAll('.result-options')]
+        .filter((group) => group.querySelector('input[type="radio"]'));
+
+    function updateCompleteButton() {
+        completeButton.disabled = resultGroups.some((group) => !group.querySelector('input[type="radio"]:checked'));
+    }
+
+    resultsForm.addEventListener('change', updateCompleteButton);
+    updateCompleteButton();
+</script>
+{% endif %}
+{% endblock %}
