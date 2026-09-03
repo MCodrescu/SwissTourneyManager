@@ -38,10 +38,8 @@
                             <td>
                                 <div class="actions">
                                     <a href="{% url 'tournaments:tournament_detail' tournament.id %}">Open</a>
-                                    <form method="post" action="{% url 'tournaments:tournament_delete' tournament.id %}">
-                                        {% csrf_token %}
-                                        <button class="link-button" type="submit">Delete</button>
-                                    </form>
+                                    <a href="{% url 'tournaments:tournament_edit' tournament.id %}">Edit</a>
+                                    <button class="link-button delete-tournament-btn" data-tournament-id="{{ tournament.id }}" data-tournament-name="{{ tournament.name }}" type="button">Delete</button>
                                 </div>
                             </td>
                         </tr>
@@ -53,4 +51,57 @@
         <p>No tournaments yet.</p>
     {% endif %}
 </section>
+
+<!-- Delete Confirmation Modal -->
+<dialog id="deleteModal" class="modal" aria-labelledby="modalTitle">
+    <div class="modal-content">
+        <h2 id="modalTitle">Confirm Deletion</h2>
+        <p id="modalMessage"></p>
+        <div class="modal-actions">
+            <button id="cancelDelete" class="button" type="button">Cancel</button>
+            <form id="deleteForm" method="post" style="display: inline;">
+                {% csrf_token %}
+                <button class="button danger" type="submit">Delete</button>
+            </form>
+        </div>
+    </div>
+</dialog>
+
+<script>
+    const modal = document.getElementById('deleteModal');
+    const deleteButtons = document.querySelectorAll('.delete-tournament-btn');
+    const cancelBtn = document.getElementById('cancelDelete');
+    const deleteForm = document.getElementById('deleteForm');
+    const modalMessage = document.getElementById('modalMessage');
+
+    deleteButtons.forEach(btn => {
+        btn.addEventListener('click', function() {
+            const tournamentId = this.dataset.tournamentId;
+            const tournamentName = this.dataset.tournamentName;
+            
+            modalMessage.textContent = `Are you sure you want to delete "${tournamentName}"? This action cannot be undone.`;
+            deleteForm.action = `{% url 'tournaments:tournament_delete' 0 %}`.replace('0', tournamentId);
+            modal.showModal();
+        });
+    });
+
+    cancelBtn.addEventListener('click', function() {
+        modal.close();
+    });
+
+    modal.addEventListener('click', function(event) {
+        if (event.target === modal) {
+            modal.close();
+        }
+    });
+
+    deleteButtons.forEach(btn => {
+        btn.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                btn.click();
+            }
+        });
+    });
+</script>
 {% endblock %}

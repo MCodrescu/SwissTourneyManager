@@ -9,6 +9,7 @@ urlpatterns = [
     path('new/', views.tournament_create, name='tournament_create'),
 	path('reset/', views.workspace_reset, name='workspace_reset'),
     path('tournament/<int:tournament_id>/delete/', views.tournament_delete, name='tournament_delete'),
+    path('tournament/<int:tournament_id>/edit/', views.tournament_edit, name='tournament_edit'),
     path('tournament/<int:tournament_id>/', views.tournament_detail, name='tournament_detail'),
     path('tournament/<int:tournament_id>/players/', views.player_list, name='player_list'),
     path('tournament/<int:tournament_id>/players/<int:player_id>/edit/', views.player_edit, name='player_edit'),

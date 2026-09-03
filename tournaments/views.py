@@ -5,6 +5,7 @@ from django.forms import modelformset_factory
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.utils import timezone
 from django.views.decorators.http import require_GET, require_POST
 
 from .forms import PairingResultForm, PlayerForm, TournamentForm
@@ -47,6 +48,16 @@ def tournament_create(request):
 		tournament.save()
 		return redirect(PLAYER_LIST_ROUTE, tournament_id=tournament.id)
 	return render(request, 'tournaments/form.html', {'form': form, 'title': 'New tournament'})
+
+
+def tournament_edit(request, tournament_id):
+	tournament = _workspace_tournament(request, tournament_id)
+	form = TournamentForm(request.POST or None, instance=tournament)
+	if request.method == 'POST' and form.is_valid():
+		form.save()
+		messages.success(request, f'{tournament.name} updated.')
+		return redirect('tournaments:tournament_detail', tournament_id=tournament.id)
+	return render(request, 'tournaments/form.html', {'form': form, 'title': f'Edit {tournament.name}', 'tournament': tournament})
 
 
 @require_POST
@@ -137,7 +148,8 @@ def complete_tournament(request, tournament_id):
 	)
 	if tournament.is_active and all_rounds_complete:
 		tournament.is_active = False
-		tournament.save(update_fields=['is_active'])
+		tournament.end_time = timezone.now()
+		tournament.save(update_fields=['is_active', 'end_time'])
 		messages.success(request, f'{tournament.name} completed.')
 		return redirect('tournaments:standings', tournament_id=tournament.id)
 	else:
@@ -193,8 +205,13 @@ def generate_round(request, tournament_id):
 						player_black=players_by_id[card.black_id],
 					)
 
-			tournament.current_round = round_number
-			tournament.save(update_fields=['current_round'])
+			if tournament.current_round == 0:
+				tournament.start_time = timezone.now()
+				tournament.current_round = round_number
+				tournament.save(update_fields=['current_round', 'start_time'])
+			else:
+				tournament.current_round = round_number
+				tournament.save(update_fields=['current_round'])
 	except IntegrityError:
 		messages.error(request, 'Another request already generated this round. Please refresh and try again.')
 		return redirect('tournaments:tournament_detail', tournament_id=tournament.id)

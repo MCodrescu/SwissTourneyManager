@@ -10,6 +10,8 @@ class Tournament(models.Model):
 	current_round = models.PositiveIntegerField(default=0)
 	created_at = models.DateTimeField(auto_now_add=True)
 	is_active = models.BooleanField(default=True)
+	start_time = models.DateTimeField(blank=True, null=True)
+	end_time = models.DateTimeField(blank=True, null=True)
 
 	class Meta:
 		ordering = ['-created_at']

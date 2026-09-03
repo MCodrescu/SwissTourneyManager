@@ -10,18 +10,26 @@
             <p>{{ completed_round_count }} of {{ tournament.num_rounds }} rounds completed</p>
         {% endif %}
         <h1>{{ tournament.name }}</h1>
+        {% if tournament.start_time %}
+            <p id="timer" class="timer" data-start-time="{{ tournament.start_time|date:'U' }}000" data-end-time="{% if tournament.end_time %}{{ tournament.end_time|date:'U' }}000{% else %}null{% endif %}">
+                Elapsed time: <span id="timer-display">0:00:00</span>
+            </p>
+        {% endif %}
     </div>
-    {% if can_complete_tournament %}
-        <form method="post" action="{% url 'tournaments:complete_tournament' tournament.id %}">
-            {% csrf_token %}
-            <button class="button primary" type="submit">Complete tournament</button>
-        </form>
-    {% elif tournament.is_active %}
-        <form method="post" action="{% url 'tournaments:generate_round' tournament.id %}">
-            {% csrf_token %}
-            <button class="button primary" type="submit">{% if tournament.current_round == 0 %}Start tournament{% else %}Generate next round{% endif %}</button>
-        </form>
-    {% endif %}
+    <div class="actions">
+        <a class="button secondary" href="{% url 'tournaments:tournament_edit' tournament.id %}">Edit name</a>
+        {% if can_complete_tournament %}
+            <form method="post" action="{% url 'tournaments:complete_tournament' tournament.id %}">
+                {% csrf_token %}
+                <button class="button primary" type="submit">Complete tournament</button>
+            </form>
+        {% elif tournament.is_active %}
+            <form method="post" action="{% url 'tournaments:generate_round' tournament.id %}">
+                {% csrf_token %}
+                <button class="button primary" type="submit">{% if tournament.current_round == 0 %}Start tournament{% else %}Generate next round{% endif %}</button>
+            </form>
+        {% endif %}
+    </div>
 </section>
 
 <div class="two-column">
@@ -51,4 +59,36 @@
         {% endif %}
     </section>
 </div>
+
+<script>
+    function formatTime(seconds) {
+        const hours = Math.floor(seconds / 3600);
+        const minutes = Math.floor((seconds % 3600) / 60);
+        const secs = seconds % 60;
+        return `${hours}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+    }
+
+    function updateTimer() {
+        const timerElement = document.getElementById('timer');
+        if (!timerElement) return;
+
+        const startTimeMs = Number.parseInt(timerElement.dataset.startTime, 10);
+        const endTimeMs = timerElement.dataset.endTime === 'null' ? null : Number.parseInt(timerElement.dataset.endTime, 10);
+        
+        const timerDisplay = document.getElementById('timer-display');
+        
+        function tick() {
+            const now = Date.now();
+            const elapsed = endTimeMs ? Math.floor((endTimeMs - startTimeMs) / 1000) : Math.floor((now - startTimeMs) / 1000);
+            timerDisplay.textContent = formatTime(elapsed);
+        }
+        
+        tick();
+        if (!endTimeMs) {
+            setInterval(tick, 1000);
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', updateTimer);
+</script>
 {% endblock %}
