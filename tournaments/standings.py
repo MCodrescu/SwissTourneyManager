@@ -37,6 +37,7 @@ class StandingRow:
 
 
 def calculate_standings(tournament):
+    """Build standings with scores, tie-breaks, records, and performance ratings."""
     players = list(tournament.players.all())
     pairings = list(
         Pairing.objects.filter(round__tournament=tournament, result__in=Pairing.completed_results())
@@ -96,6 +97,7 @@ def _build_standing_row(player, pairings, scores):
 
 
 def _performance_rating(player, pairings, record, scores):
+    """Estimate performance using average opponent rating and the FIDE lookup table."""
     opponents = []
     for pairing in pairings:
         if not _has_player(pairing, player) or pairing.result == Pairing.ResultChoices.BYE:

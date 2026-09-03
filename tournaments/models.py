@@ -71,6 +71,7 @@ class Round(models.Model):
 
 	@property
 	def elapsed_time(self):
+		"""Return the completed round duration as H:MM:SS, or None if incomplete."""
 		if self.completed_at is None:
 			return None
 		total_seconds = max(0, int((self.completed_at - self.created_at).total_seconds()))
