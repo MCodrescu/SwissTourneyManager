@@ -3,6 +3,24 @@ from dataclasses import dataclass
 from .models import Pairing
 
 
+# FIDE Rating Regulations, section 8.1.1: fractional score to rating difference.
+FIDE_SCORE_TO_DIFFERENCE = {
+    score / 100: difference
+    for score, difference in enumerate([
+        -800, -677, -589, -538, -501, -470, -444, -422, -401, -383,
+        -366, -351, -336, -322, -309, -296, -284, -273, -262, -251,
+        -240, -230, -220, -211, -202, -193, -184, -175, -166, -158,
+        -149, -141, -133, -125, -117, -110, -102, -95, -87, -80,
+        -72, -65, -57, -50, -43, -36, -29, -21, -14, -7,
+        0, 7, 14, 21, 29, 36, 43, 50, 57, 65,
+        72, 80, 87, 95, 102, 110, 117, 125, 133, 141,
+        149, 158, 166, 175, 184, 193, 202, 211, 220, 230,
+        240, 251, 262, 273, 284, 296, 309, 322, 336, 351,
+        366, 383, 401, 422, 444, 470, 501, 538, 589, 677, 800,
+    ])
+}
+
+
 @dataclass(frozen=True)
 class StandingRow:
     player: object
@@ -15,6 +33,7 @@ class StandingRow:
     byes: int
     color_history: tuple[str, ...]
     opponent_ids: tuple[int, ...]
+    performance_rating: int | None
 
 
 def calculate_standings(tournament):
@@ -72,7 +91,33 @@ def _build_standing_row(player, pairings, scores):
         byes=record['byes'],
         color_history=tuple(colors),
         opponent_ids=tuple(opponent_ids),
+        performance_rating=_performance_rating(player, pairings, record, scores),
     )
+
+
+def _performance_rating(player, pairings, record, scores):
+    opponents = []
+    for pairing in pairings:
+        if not _has_player(pairing, player) or pairing.result == Pairing.ResultChoices.BYE:
+            continue
+        opponent = pairing.opponent_for(player)
+        if opponent is not None:
+            opponents.append(opponent)
+
+    if not opponents:
+        return None
+
+    average_opponent_rating = sum(
+        opponent.initial_rating if opponent.initial_rating is not None else 1200
+        for opponent in opponents
+    ) / len(opponents)
+    score_percentage = (record['wins'] + record['draws'] * 0.5) / len(opponents)
+    nearest_score = min(
+        FIDE_SCORE_TO_DIFFERENCE,
+        key=lambda table_score: abs(table_score - score_percentage),
+    )
+    adjustment = FIDE_SCORE_TO_DIFFERENCE[nearest_score]
+    return round(average_opponent_rating + adjustment)
 
 
 def _append_color(colors, pairing, player):

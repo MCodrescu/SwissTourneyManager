@@ -82,6 +82,23 @@ class StandingsTests(TestCase):
 		self.assertEqual(rows['Cara'].score, 1.0)
 		self.assertEqual(rows['Bob'].score, 0.0)
 
+	def test_performance_rating_uses_1200_for_blank_opponent_rating(self):
+		tournament = Tournament.objects.create(name='Club Night', num_rounds=1, is_active=False)
+		alice = Player.objects.create(tournament=tournament, name='Alice', initial_rating=1400)
+		bob = Player.objects.create(tournament=tournament, name='Bob')
+		round_one = Round.objects.create(tournament=tournament, round_number=1, is_completed=True)
+		Pairing.objects.create(
+			round=round_one,
+			player_white=alice,
+			player_black=bob,
+			result=Pairing.ResultChoices.WHITE_WIN,
+		)
+
+		rows = {row.player.name: row for row in calculate_standings(tournament)}
+
+		self.assertEqual(rows['Alice'].performance_rating, 2000)
+		self.assertEqual(rows['Bob'].performance_rating, 600)
+
 
 class DirectorFlowTests(TestCase):
 	def setUp(self):
@@ -101,6 +118,36 @@ class DirectorFlowTests(TestCase):
 		self.assertRedirects(response, '/')
 		self.assertFalse(Tournament.objects.filter(id=tournament.id).exists())
 
+	def test_new_tournament_redirects_to_overview(self):
+		response = self.client.post('/new/', {'name': 'Sunday Swiss', 'num_rounds': 4})
+
+		tournament = Tournament.objects.get(name='Sunday Swiss')
+		self.assertRedirects(response, f'/tournament/{tournament.id}/')
+
+	def test_tournament_round_count_can_be_edited_before_starting(self):
+		tournament = self.create_tournament(name='Saturday Swiss', num_rounds=4)
+
+		response = self.client.post(
+			f'/tournament/{tournament.id}/edit/',
+			{'name': 'Saturday Swiss', 'num_rounds': 6},
+		)
+
+		self.assertRedirects(response, f'/tournament/{tournament.id}/')
+		tournament.refresh_from_db()
+		self.assertEqual(tournament.num_rounds, 6)
+
+	def test_tournament_round_count_cannot_be_edited_after_starting(self):
+		tournament = self.create_tournament(name='Saturday Swiss', num_rounds=4, current_round=1)
+
+		response = self.client.post(
+			f'/tournament/{tournament.id}/edit/',
+			{'name': 'Saturday Swiss', 'num_rounds': 6},
+		)
+
+		self.assertRedirects(response, f'/tournament/{tournament.id}/')
+		tournament.refresh_from_db()
+		self.assertEqual(tournament.num_rounds, 4)
+
 	def test_overview_shows_completed_round_progress(self):
 		tournament = self.create_tournament(name='Saturday Swiss', num_rounds=3, current_round=1)
 		Round.objects.create(tournament=tournament, round_number=1, is_completed=True)
@@ -116,6 +163,22 @@ class DirectorFlowTests(TestCase):
 		response = self.client.get(f'/tournament/{tournament.id}/')
 
 		self.assertContains(response, 'Round 1 - in progress')
+
+	def test_overview_shows_exact_completed_round_duration(self):
+		created_at = timezone.now() - timezone.timedelta(hours=1, minutes=2, seconds=3)
+		completed_at = timezone.now()
+		tournament = self.create_tournament(name='Saturday Swiss', current_round=1)
+		Round.objects.create(
+			tournament=tournament,
+			round_number=1,
+			is_completed=True,
+			created_at=created_at,
+			completed_at=completed_at,
+		)
+
+		response = self.client.get(f'/tournament/{tournament.id}/')
+
+		self.assertContains(response, 'Round 1 - completed (1:02:03)')
 
 	def test_overview_shows_completion_status_after_final_round(self):
 		tournament = self.create_tournament(name='Saturday Swiss', num_rounds=1, current_round=1)
@@ -137,8 +200,19 @@ class DirectorFlowTests(TestCase):
 
 		response = self.client.get(f'/tournament/{tournament.id}/')
 
-		self.assertContains(response, 'Start tournament')
-		self.assertNotContains(response, 'Generate next round')
+		self.assertContains(response, 'Start Tournament')
+		self.assertContains(response, 'disabled')
+		self.assertNotContains(response, 'Next Round')
+
+	def test_overview_enables_start_with_two_active_players(self):
+		tournament = self.create_tournament(name='Saturday Swiss')
+		Player.objects.create(tournament=tournament, name='Alice')
+		Player.objects.create(tournament=tournament, name='Bob')
+
+		response = self.client.get(f'/tournament/{tournament.id}/')
+
+		self.assertContains(response, 'Start Tournament')
+		self.assertNotContains(response, '<button class="button primary" type="submit" disabled>', html=True)
 
 	def test_players_page_starts_tournament_and_opens_first_round(self):
 		tournament = self.create_tournament(name='Saturday Swiss')
@@ -146,7 +220,7 @@ class DirectorFlowTests(TestCase):
 		Player.objects.create(tournament=tournament, name='Bob')
 
 		response = self.client.get(f'/tournament/{tournament.id}/players/')
-		self.assertContains(response, 'Start tournament')
+		self.assertContains(response, 'Start Tournament')
 
 		response = self.client.post(f'/tournament/{tournament.id}/rounds/generate/')
 		round_obj = tournament.rounds.get(round_number=1)
@@ -165,7 +239,7 @@ class DirectorFlowTests(TestCase):
 
 		response = self.client.get(f'/tournament/{tournament.id}/players/')
 
-		self.assertContains(response, '<button class="button primary" type="submit" disabled>Start tournament</button>', html=True)
+		self.assertContains(response, '<button class="button primary" type="submit" disabled>Start Tournament</button>', html=True)
 
 	def test_players_page_blocks_adding_players_after_tournament_starts(self):
 		tournament = self.create_tournament(name='Saturday Swiss', current_round=1)
@@ -195,7 +269,7 @@ class DirectorFlowTests(TestCase):
 		Round.objects.create(tournament=tournament, round_number=1, is_completed=True)
 
 		response = self.client.get(f'/tournament/{tournament.id}/')
-		self.assertContains(response, 'Complete tournament')
+		self.assertContains(response, 'Complete Tournament')
 
 		response = self.client.post(f'/tournament/{tournament.id}/complete/')
 		self.assertRedirects(response, f'/tournament/{tournament.id}/standings/')

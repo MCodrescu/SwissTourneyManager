@@ -46,7 +46,7 @@ def tournament_create(request):
 		tournament = form.save(commit=False)
 		tournament.workspace_key = workspace_key
 		tournament.save()
-		return redirect(PLAYER_LIST_ROUTE, tournament_id=tournament.id)
+		return redirect('tournaments:tournament_detail', tournament_id=tournament.id)
 	return render(request, 'tournaments/form.html', {'form': form, 'title': 'New tournament'})
 
 
@@ -74,6 +74,7 @@ def tournament_detail(request, tournament_id):
 	tournament = _workspace_tournament(request, tournament_id)
 	rounds = tournament.rounds.prefetch_related('pairings')
 	standings = calculate_standings(tournament)
+	active_player_count = tournament.players.filter(is_withdrawn=False).count()
 	rounds_remaining = max(tournament.num_rounds - tournament.current_round, 0)
 	completed_round_count = rounds.filter(is_completed=True).count()
 	can_complete_tournament = (
@@ -86,6 +87,7 @@ def tournament_detail(request, tournament_id):
 		'tournament': tournament,
 		'rounds': rounds,
 		'standings': standings,
+		'active_player_count': active_player_count,
 		'rounds_remaining': rounds_remaining,
 		'completed_round_count': completed_round_count,
 		'can_complete_tournament': can_complete_tournament,
@@ -232,7 +234,8 @@ def round_detail(request, tournament_id, round_id):
 			formset.save()
 			if not round_obj.pairings.filter(result=Pairing.ResultChoices.PENDING).exists():
 				round_obj.is_completed = True
-				round_obj.save(update_fields=['is_completed'])
+				round_obj.completed_at = timezone.now()
+				round_obj.save(update_fields=['is_completed', 'completed_at'])
 				messages.success(request, f'Round {round_obj.round_number} completed.')
 				return redirect('tournaments:tournament_detail', tournament_id=tournament.id)
 		messages.error(request, 'Enter all board results before completing the round.')

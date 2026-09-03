@@ -12,8 +12,7 @@ class TournamentForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields['num_rounds'].max_value = settings.TOURNAMENT_ROUND_LIMIT
-        # If editing an existing tournament (has an id), allow editing name only
-        if self.instance.pk:
+        if self.instance.pk and self.instance.current_round > 0:
             self.fields['num_rounds'].disabled = True
 
 

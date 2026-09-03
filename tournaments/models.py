@@ -60,6 +60,7 @@ class Round(models.Model):
 	round_number = models.PositiveIntegerField()
 	is_completed = models.BooleanField(default=False)
 	created_at = models.DateTimeField(default=timezone.now)
+	completed_at = models.DateTimeField(blank=True, null=True)
 
 	class Meta:
 		ordering = ['round_number']
@@ -67,6 +68,15 @@ class Round(models.Model):
 
 	def __str__(self):
 		return f'{self.tournament} - Round {self.round_number}'
+
+	@property
+	def elapsed_time(self):
+		if self.completed_at is None:
+			return None
+		total_seconds = max(0, int((self.completed_at - self.created_at).total_seconds()))
+		hours, remainder = divmod(total_seconds, 3600)
+		minutes, seconds = divmod(remainder, 60)
+		return f'{hours}:{minutes:02d}:{seconds:02d}'
 
 
 class Pairing(models.Model):

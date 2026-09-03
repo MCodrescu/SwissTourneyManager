@@ -9,14 +9,14 @@
     {% if tournament.is_active and tournament.current_round == 0 %}
         <form method="post" action="{% url 'tournaments:generate_round' tournament.id %}">
             {% csrf_token %}
-            <button class="button primary" type="submit" {% if active_player_count < 2 %}disabled{% endif %}>Start tournament</button>
+            <button class="button primary" type="submit" {% if active_player_count < 2 %}disabled{% endif %}>Start Tournament</button>
         </form>
     {% endif %}
 </section>
 
 <div class="two-column wide-left">
     <section class="panel">
-        <h2>Roster</h2>
+        <h2>Roster{% if players %} ({{ players|length }}){% endif %}</h2>
         {% if players %}
             <div class="table-wrap">
                 <table>
