@@ -5,6 +5,9 @@
     <div>
         <p class="eyebrow">{{ tournament.name }}</p>
         <h1>Round {{ round.round_number }}</h1>
+        <p id="timer" class="timer" data-start-time="{{ round.created_at|date:'U' }}000" data-end-time="{% if round.completed_at %}{{ round.completed_at|date:'U' }}000{% else %}null{% endif %}">
+            Round Elapsed Time: <span id="timer-display">0:00:00</span>
+        </p>
     </div>
 </section>
 
@@ -37,6 +40,46 @@
         {% endif %}
     </form>
 </section>
+<script>
+    const maximumTournamentSeconds = 24 * 60 * 60;
+
+    function formatTime(seconds) {
+        const hours = Math.floor(seconds / 3600);
+        const minutes = Math.floor((seconds % 3600) / 60);
+        const secs = seconds % 60;
+        return `${hours}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+    }
+
+    function updateTimer() {
+        const timerElement = document.getElementById('timer');
+        if (!timerElement) return;
+
+        const startTimeMs = Number.parseInt(timerElement.dataset.startTime, 10);
+        const endTimeMs = timerElement.dataset.endTime === 'null' ? null : Number.parseInt(timerElement.dataset.endTime, 10);
+
+        const timerDisplay = document.getElementById('timer-display');
+        let timerInterval;
+
+        function tick() {
+            const now = Date.now();
+            const elapsed = Math.min(
+                maximumTournamentSeconds,
+                endTimeMs ? Math.floor((endTimeMs - startTimeMs) / 1000) : Math.floor((now - startTimeMs) / 1000),
+            );
+            timerDisplay.textContent = formatTime(elapsed);
+            if (elapsed >= maximumTournamentSeconds && timerInterval) {
+                clearInterval(timerInterval);
+            }
+        }
+
+        tick();
+        if (!endTimeMs) {
+            timerInterval = setInterval(tick, 1000);
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', updateTimer);
+</script>
 {% if not round.is_completed %}
 <script>
     const resultsForm = document.querySelector('#round-results-form');
