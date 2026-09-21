@@ -160,6 +160,19 @@ def complete_tournament(request, tournament_id):
 
 
 @require_POST
+def end_tournament_early(request, tournament_id):
+	tournament = _workspace_tournament(request, tournament_id)
+	if tournament.is_active:
+		tournament.is_active = False
+		tournament.end_time = timezone.now()
+		tournament.save(update_fields=['is_active', 'end_time'])
+		messages.success(request, f'{tournament.name} ended early.')
+		return redirect('tournaments:standings', tournament_id=tournament.id)
+	messages.error(request, 'This tournament has already ended.')
+	return redirect('tournaments:tournament_detail', tournament_id=tournament.id)
+
+
+@require_POST
 def generate_round(request, tournament_id):
 	tournament = _workspace_tournament(request, tournament_id)
 	if tournament.current_round >= tournament.num_rounds:

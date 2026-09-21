@@ -30,8 +30,16 @@
         {% endif %}
         <a class="button secondary" href="{% url 'tournaments:player_list' tournament.id %}">Players</a>
         <a class="button secondary icon-button" href="{% url 'tournaments:tournament_edit' tournament.id %}" aria-label="Edit tournament name" title="Edit tournament name">&#9998;</a>
+        {% if tournament.is_active %}
+            <button id="endEarlyBtn" class="button secondary icon-button" type="button" aria-label="End Tournament Early" title="End Tournament Early">&#9209;</button>
+        {% endif %}
     </div>
 </section>
+{% if tournament.is_active %}
+    <form id="endEarlyForm" method="post" action="{% url 'tournaments:end_tournament_early' tournament.id %}">
+        {% csrf_token %}
+    </form>
+{% endif %}
 
 <div class="two-column">
     <section class="panel">
@@ -101,4 +109,37 @@
 
     document.addEventListener('DOMContentLoaded', updateTimer);
 </script>
+
+{% if tournament.is_active %}
+<dialog id="endEarlyModal" class="modal" aria-labelledby="endEarlyModalTitle">
+    <div class="modal-content">
+        <h2 id="endEarlyModalTitle">Confirm End Tournament Early</h2>
+        <p>Are you sure you want to end "{{ tournament.name }}" early? Remaining rounds will not be played and this action cannot be undone.</p>
+        <div class="modal-actions">
+            <button id="cancelEndEarly" class="button" type="button">Cancel</button>
+            <button id="confirmEndEarly" class="button danger" type="submit" form="endEarlyForm">End Tournament Early</button>
+        </div>
+    </div>
+</dialog>
+
+<script>
+    const endEarlyModal = document.getElementById('endEarlyModal');
+    const endEarlyBtn = document.getElementById('endEarlyBtn');
+    const cancelEndEarlyBtn = document.getElementById('cancelEndEarly');
+
+    endEarlyBtn.addEventListener('click', function() {
+        endEarlyModal.showModal();
+    });
+
+    cancelEndEarlyBtn.addEventListener('click', function() {
+        endEarlyModal.close();
+    });
+
+    endEarlyModal.addEventListener('click', function(event) {
+        if (event.target === endEarlyModal) {
+            endEarlyModal.close();
+        }
+    });
+</script>
+{% endif %}
 {% endblock %}
