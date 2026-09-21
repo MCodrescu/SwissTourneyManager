@@ -8,10 +8,10 @@
     </div>
     <div class="actions">
         {% if tournaments %}
-            <form method="post" action="{% url 'tournaments:workspace_reset' %}">
+            <form id="resetForm" method="post" action="{% url 'tournaments:workspace_reset' %}">
                 {% csrf_token %}
-                <button class="link-button" type="submit">Start over</button>
             </form>
+            <button id="startOverBtn" class="link-button" type="button">Start over</button>
         {% endif %}
         <a class="button primary" href="{% url 'tournaments:tournament_create' %}">New tournament</a>
     </div>
@@ -67,6 +67,18 @@
     </div>
 </dialog>
 
+<!-- Start Over Confirmation Modal -->
+<dialog id="resetModal" class="modal" aria-labelledby="resetModalTitle">
+    <div class="modal-content">
+        <h2 id="resetModalTitle">Confirm Start Over</h2>
+        <p>Are you sure you want to clear all tournaments? This action cannot be undone.</p>
+        <div class="modal-actions">
+            <button id="cancelReset" class="button" type="button">Cancel</button>
+            <button id="confirmReset" class="button danger" type="submit" form="resetForm">Start over</button>
+        </div>
+    </div>
+</dialog>
+
 <script>
     const modal = document.getElementById('deleteModal');
     const deleteButtons = document.querySelectorAll('.delete-tournament-btn');
@@ -102,6 +114,26 @@
                 btn.click();
             }
         });
+    });
+
+    const resetModal = document.getElementById('resetModal');
+    const startOverBtn = document.getElementById('startOverBtn');
+    const cancelResetBtn = document.getElementById('cancelReset');
+
+    if (startOverBtn) {
+        startOverBtn.addEventListener('click', function() {
+            resetModal.showModal();
+        });
+    }
+
+    cancelResetBtn.addEventListener('click', function() {
+        resetModal.close();
+    });
+
+    resetModal.addEventListener('click', function(event) {
+        if (event.target === resetModal) {
+            resetModal.close();
+        }
     });
 </script>
 {% endblock %}
