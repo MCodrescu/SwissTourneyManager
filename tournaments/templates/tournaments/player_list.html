@@ -6,11 +6,13 @@
         <p class="eyebrow">{{ tournament.name }}</p>
         <h1>Players</h1>
     </div>
-    {% if tournament.is_active and tournament.current_round == 0 %}
+    {% if tournament.is_active and tournament.current_round == 0 and not pending_round %}
         <form method="post" action="{% url 'tournaments:generate_round' tournament.id %}">
             {% csrf_token %}
-            <button class="button primary" type="submit" {% if active_player_count < 2 %}disabled{% endif %}>Start Tournament</button>
+            <button class="button primary" type="submit" {% if active_player_count < 2 %}disabled{% endif %}>Post Round 1 Pairings</button>
         </form>
+    {% elif pending_round %}
+        <a class="button primary" href="{% url 'tournaments:round_detail' tournament.id pending_round.id %}">Review Round {{ pending_round.round_number }} Pairings</a>
     {% endif %}
 </section>
 
@@ -49,8 +51,8 @@
     </section>
     <section class="panel">
         <h2>Add player</h2>
-        {% if tournament_started %}
-            <p>Players can only be added before the tournament starts.</p>
+        {% if roster_locked %}
+            <p>Players cannot be added while a round is in progress.</p>
         {% else %}
             <form method="post" class="stacked-form">
                 {% csrf_token %}

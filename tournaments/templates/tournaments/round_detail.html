@@ -5,12 +5,125 @@
     <div>
         <p class="eyebrow">{{ tournament.name }}</p>
         <h1>Round {{ round.round_number }}</h1>
-        <p id="timer" class="timer" data-start-time="{{ round.created_at|date:'U' }}000" data-end-time="{% if round.completed_at %}{{ round.completed_at|date:'U' }}000{% else %}null{% endif %}">
-            Round Elapsed Time: <span id="timer-display">0:00:00</span>
-        </p>
+        {% if round.is_started %}
+            <p id="timer" class="timer" data-start-time="{{ round.clock_start|date:'U' }}000" data-end-time="{% if round.completed_at %}{{ round.completed_at|date:'U' }}000{% else %}null{% endif %}">
+                Round Elapsed Time: <span id="timer-display">0:00:00</span>
+            </p>
+        {% endif %}
+    </div>
+    {% if not round.is_started %}
+        <div class="actions">
+            <form method="post" action="{% url 'tournaments:start_round' tournament.id round.id %}">
+                {% csrf_token %}
+                <button class="button primary" type="submit">Start Round</button>
+            </form>
+            <button id="addLatePlayerBtn" class="button secondary" type="button">Add Late Entry</button>
+        </div>
+    {% endif %}
+</section>
+
+{% if not round.is_started %}
+<section class="panel">
+    <h2>Board Pairings</h2>
+    <div class="pairing-list">
+        {% for pairing in board_pairings %}
+            <article class="pairing-row draft-row">
+                <div class="board-label">Board {{ pairing.board_number }}</div>
+                <div class="board-players">{{ pairing.player_white.name }} (W) <span>vs</span> {{ pairing.player_black.name }} (B)</div>
+                <div class="board-actions">
+                    <button type="button" class="button secondary icon-button board-menu-button"
+                        data-board="Board {{ pairing.board_number }}"
+                        data-players="[{&quot;name&quot;: &quot;{{ pairing.player_white.name|escapejs }}&quot;, &quot;url&quot;: &quot;{% url 'tournaments:pairing_remove_player' tournament.id round.id pairing.player_white_id %}&quot;}, {&quot;name&quot;: &quot;{{ pairing.player_black.name|escapejs }}&quot;, &quot;url&quot;: &quot;{% url 'tournaments:pairing_remove_player' tournament.id round.id pairing.player_black_id %}&quot;}]"
+                        aria-label="Edit Board {{ pairing.board_number }}" title="Edit board">&#8943;</button>
+                </div>
+            </article>
+        {% endfor %}
+        {% for pairing in round.pairings.all %}
+            {% if pairing.bye_player_id %}
+                <article class="pairing-row bye-row draft-row">
+                    <div class="board-label">Bye</div>
+                    <div class="board-players">{{ pairing.bye_player.name }}</div>
+                    <div class="board-actions">
+                        <button type="button" class="button secondary icon-button board-menu-button"
+                            data-board="Bye"
+                            data-players="[{&quot;name&quot;: &quot;{{ pairing.bye_player.name|escapejs }}&quot;, &quot;url&quot;: &quot;{% url 'tournaments:pairing_remove_player' tournament.id round.id pairing.bye_player_id %}&quot;}]"
+                            aria-label="Edit bye" title="Edit bye">&#8943;</button>
+                    </div>
+                </article>
+            {% endif %}
+        {% endfor %}
     </div>
 </section>
 
+<dialog id="addLatePlayerModal" class="modal" aria-labelledby="addLatePlayerModalTitle">
+    <div class="modal-content">
+        <h2 id="addLatePlayerModalTitle">Add late entry</h2>
+        <p>The new player takes the open seat: whoever holds the bye comes back into play, or the late entry takes the bye if every board is full.</p>
+        <form method="post" id="addLatePlayerForm" class="stacked-form" action="{% url 'tournaments:round_add_player' tournament.id round.id %}">
+            {% csrf_token %}
+            {{ add_player_form.as_p }}
+        </form>
+        <div class="modal-actions">
+            <button id="cancelAddLatePlayer" class="button" type="button">Cancel</button>
+            <button class="button primary" type="submit" form="addLatePlayerForm">Add Player</button>
+        </div>
+    </div>
+</dialog>
+
+<dialog id="boardEditModal" class="modal" aria-labelledby="boardEditModalTitle">
+    <div class="modal-content">
+        <h2 id="boardEditModalTitle">Edit board</h2>
+        <p>Removing a player withdraws them from the tournament. Anyone left without an opponent is moved to an open board; every other board stays put.</p>
+        <form method="post" id="boardEditForm">
+            {% csrf_token %}
+            <div class="modal-player-list" id="boardEditPlayers"></div>
+        </form>
+        <div class="modal-actions">
+            <button id="cancelBoardEdit" class="button" type="button">Cancel</button>
+        </div>
+    </div>
+</dialog>
+
+<script>
+    const boardEditModal = document.getElementById('boardEditModal');
+    const boardEditTitle = document.getElementById('boardEditModalTitle');
+    const boardEditPlayers = document.getElementById('boardEditPlayers');
+
+    document.querySelectorAll('.board-menu-button').forEach((button) => {
+        button.addEventListener('click', () => {
+            boardEditTitle.textContent = `Edit ${button.dataset.board}`;
+            boardEditPlayers.replaceChildren(...JSON.parse(button.dataset.players).map((player) => {
+                const removeButton = document.createElement('button');
+                removeButton.type = 'submit';
+                removeButton.className = 'button danger';
+                removeButton.formAction = player.url;
+                removeButton.textContent = `Remove ${player.name}`;
+                return removeButton;
+            }));
+            boardEditModal.showModal();
+        });
+    });
+
+    document.getElementById('cancelBoardEdit').addEventListener('click', () => boardEditModal.close());
+    boardEditModal.addEventListener('click', (event) => {
+        if (event.target === boardEditModal) {
+            boardEditModal.close();
+        }
+    });
+
+    const addLatePlayerModal = document.getElementById('addLatePlayerModal');
+    document.getElementById('addLatePlayerBtn').addEventListener('click', () => {
+        document.getElementById('addLatePlayerForm').reset();
+        addLatePlayerModal.showModal();
+    });
+    document.getElementById('cancelAddLatePlayer').addEventListener('click', () => addLatePlayerModal.close());
+    addLatePlayerModal.addEventListener('click', (event) => {
+        if (event.target === addLatePlayerModal) {
+            addLatePlayerModal.close();
+        }
+    });
+</script>
+{% else %}
 <section class="panel">
     <h2>Board Pairings</h2>
     <form method="post" id="round-results-form">
@@ -20,7 +133,7 @@
             {% for form in formset %}
                 <article class="pairing-row">
                     {{ form.id }}
-                    <div class="board-label">Board {{ forloop.counter }}</div>
+                    <div class="board-label">Board {{ form.instance.board_number }}</div>
                     <div class="board-players">{{ form.instance.player_white.name }} (W) <span>vs</span> {{ form.instance.player_black.name }} (B){% if form.instance.is_forfeit %} <em>(forfeit — withdrawn player)</em>{% endif %}</div>
                     <div class="result-options">{{ form.result }}</div>
                 </article>
@@ -40,6 +153,7 @@
         {% endif %}
     </form>
 </section>
+{% endif %}
 <script>
     const maximumTournamentSeconds = 24 * 60 * 60;
 
@@ -80,7 +194,7 @@
 
     document.addEventListener('DOMContentLoaded', updateTimer);
 </script>
-{% if not round.is_completed %}
+{% if round.is_started and not round.is_completed %}
 <script>
     const resultsForm = document.querySelector('#round-results-form');
     const completeButton = document.querySelector('#complete-round-button');

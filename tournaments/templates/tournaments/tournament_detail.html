@@ -22,10 +22,12 @@
                 {% csrf_token %}
                 <button class="button primary" type="submit">Complete Tournament</button>
             </form>
+        {% elif pending_round %}
+            <a class="button primary" href="{% url 'tournaments:round_detail' tournament.id pending_round.id %}">Review Round {{ pending_round.round_number }} Pairings</a>
         {% elif tournament.is_active %}
             <form method="post" action="{% url 'tournaments:generate_round' tournament.id %}">
                 {% csrf_token %}
-                <button class="button primary" type="submit" {% if tournament.current_round == 0 and active_player_count < 2 %}disabled{% endif %}>{% if tournament.current_round == 0 %}Start Tournament{% else %}Next Round{% endif %}</button>
+                <button class="button primary" type="submit" {% if not can_post_pairings %}disabled{% endif %}>{% if tournament.current_round == 0 %}Post Round 1 Pairings{% else %}Next Round{% endif %}</button>
             </form>
         {% endif %}
         <a class="button secondary" href="{% url 'tournaments:player_list' tournament.id %}">Players</a>
@@ -47,7 +49,7 @@
         {% if rounds %}
             <div class="round-list">
                 {% for round in rounds %}
-                    <a href="{% url 'tournaments:round_detail' tournament.id round.id %}">Round {{ round.round_number }}{% if round.is_completed %} - completed{% if round.elapsed_time %} ({{ round.elapsed_time }}){% endif %}{% else %} - in progress{% endif %}</a>
+                    <a href="{% url 'tournaments:round_detail' tournament.id round.id %}">Round {{ round.round_number }}{% if round.is_completed %} - completed{% if round.elapsed_time %} ({{ round.elapsed_time }}){% endif %}{% elif not round.is_started %} - pairings posted{% else %} - in progress{% endif %}</a>
                 {% endfor %}
             </div>
         {% else %}

@@ -1,6 +1,7 @@
 from django.contrib.sessions.models import Session
 from django.core.cache import cache
 from django.core.management import call_command
+from django.db import models
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
@@ -158,11 +159,20 @@ class DirectorFlowTests(TestCase):
 
 	def test_overview_labels_incomplete_round_as_in_progress(self):
 		tournament = self.create_tournament(name='Saturday Swiss', current_round=1)
-		Round.objects.create(tournament=tournament, round_number=1)
+		Round.objects.create(tournament=tournament, round_number=1, is_started=True)
 
 		response = self.client.get(f'/tournament/{tournament.id}/')
 
 		self.assertContains(response, 'Round 1 - in progress')
+
+	def test_overview_labels_unstarted_round_as_pairings_posted(self):
+		tournament = self.create_tournament(name='Saturday Swiss')
+		Round.objects.create(tournament=tournament, round_number=1)
+
+		response = self.client.get(f'/tournament/{tournament.id}/')
+
+		self.assertContains(response, 'Round 1 - pairings posted')
+		self.assertContains(response, 'Review Round 1 Pairings')
 
 	def test_overview_shows_exact_completed_round_duration(self):
 		created_at = timezone.now() - timezone.timedelta(hours=1, minutes=2, seconds=3)
@@ -172,7 +182,9 @@ class DirectorFlowTests(TestCase):
 			tournament=tournament,
 			round_number=1,
 			is_completed=True,
+			is_started=True,
 			created_at=created_at,
+			started_at=created_at,
 			completed_at=completed_at,
 		)
 
@@ -195,14 +207,34 @@ class DirectorFlowTests(TestCase):
 
 		self.assertContains(response, '<strong>Tournament Completed</strong>', html=True)
 
-	def test_overview_labels_first_round_action_as_start_tournament(self):
+	def test_overview_labels_first_round_action_as_post_pairings(self):
 		tournament = self.create_tournament(name='Saturday Swiss')
 
 		response = self.client.get(f'/tournament/{tournament.id}/')
 
-		self.assertContains(response, 'Start Tournament')
+		self.assertContains(response, 'Post Round 1 Pairings')
 		self.assertContains(response, 'disabled')
 		self.assertNotContains(response, 'Next Round')
+
+	def test_overview_disables_next_round_while_a_round_is_in_progress(self):
+		tournament = self.create_tournament(name='Saturday Swiss', num_rounds=3, current_round=1)
+		Player.objects.create(tournament=tournament, name='Alice')
+		Player.objects.create(tournament=tournament, name='Bob')
+		Round.objects.create(tournament=tournament, round_number=1, is_started=True)
+
+		response = self.client.get(f'/tournament/{tournament.id}/')
+
+		self.assertContains(response, '<button class="button primary" type="submit" disabled>Next Round</button>', html=True)
+
+	def test_overview_enables_next_round_once_the_round_completes(self):
+		tournament = self.create_tournament(name='Saturday Swiss', num_rounds=3, current_round=1)
+		Player.objects.create(tournament=tournament, name='Alice')
+		Player.objects.create(tournament=tournament, name='Bob')
+		Round.objects.create(tournament=tournament, round_number=1, is_started=True, is_completed=True)
+
+		response = self.client.get(f'/tournament/{tournament.id}/')
+
+		self.assertContains(response, '<button class="button primary" type="submit" >Next Round</button>', html=True)
 
 	def test_overview_enables_start_with_two_active_players(self):
 		tournament = self.create_tournament(name='Saturday Swiss')
@@ -211,16 +243,16 @@ class DirectorFlowTests(TestCase):
 
 		response = self.client.get(f'/tournament/{tournament.id}/')
 
-		self.assertContains(response, 'Start Tournament')
+		self.assertContains(response, 'Post Round 1 Pairings')
 		self.assertNotContains(response, '<button class="button primary" type="submit" disabled>', html=True)
 
-	def test_players_page_starts_tournament_and_opens_first_round(self):
+	def test_players_page_posts_pairings_and_opens_first_round(self):
 		tournament = self.create_tournament(name='Saturday Swiss')
 		Player.objects.create(tournament=tournament, name='Alice')
 		Player.objects.create(tournament=tournament, name='Bob')
 
 		response = self.client.get(f'/tournament/{tournament.id}/players/')
-		self.assertContains(response, 'Start Tournament')
+		self.assertContains(response, 'Post Round 1 Pairings')
 
 		response = self.client.post(f'/tournament/{tournament.id}/rounds/generate/')
 		round_obj = tournament.rounds.get(round_number=1)
@@ -230,8 +262,97 @@ class DirectorFlowTests(TestCase):
 			fetch_redirect_response=False,
 		)
 
+		# pairings exist but nothing is locked in until the round is started
+		tournament.refresh_from_db()
+		self.assertEqual(tournament.current_round, 0)
+		self.assertFalse(round_obj.is_started)
+
 		response = self.client.get(response.url)
-		self.assertContains(response, 'Tournament started. Round 1 pairings are ready.')
+		self.assertContains(response, 'Round 1 pairings posted')
+		self.assertContains(response, 'Start Round')
+
+	def test_starting_a_round_locks_it_in(self):
+		tournament = self.create_tournament(name='Saturday Swiss')
+		Player.objects.create(tournament=tournament, name='Alice')
+		Player.objects.create(tournament=tournament, name='Bob')
+		self.client.post(f'/tournament/{tournament.id}/rounds/generate/')
+		round_obj = tournament.rounds.get(round_number=1)
+
+		response = self.client.post(f'/tournament/{tournament.id}/rounds/{round_obj.id}/start/')
+
+		self.assertRedirects(
+			response,
+			f'/tournament/{tournament.id}/rounds/{round_obj.id}/',
+			fetch_redirect_response=False,
+		)
+		round_obj.refresh_from_db()
+		tournament.refresh_from_db()
+		self.assertTrue(round_obj.is_started)
+		self.assertIsNotNone(round_obj.started_at)
+		self.assertEqual(tournament.current_round, 1)
+		self.assertIsNotNone(tournament.start_time)
+
+	def test_generating_again_while_pairings_are_posted_is_rejected(self):
+		tournament = self.create_tournament(name='Saturday Swiss')
+		Player.objects.create(tournament=tournament, name='Alice')
+		Player.objects.create(tournament=tournament, name='Bob')
+		self.client.post(f'/tournament/{tournament.id}/rounds/generate/')
+
+		self.client.post(f'/tournament/{tournament.id}/rounds/generate/')
+
+		self.assertEqual(tournament.rounds.count(), 1)
+
+	def test_removing_a_player_reseats_their_opponent_without_moving_other_boards(self):
+		tournament = self.create_tournament(name='Saturday Swiss')
+		for index, name in enumerate(['Alice', 'Bob', 'Cara', 'Dan', 'Erin']):
+			Player.objects.create(tournament=tournament, name=name, initial_rating=1500 - index * 10)
+		self.client.post(f'/tournament/{tournament.id}/rounds/generate/')
+		round_obj = tournament.rounds.get(round_number=1)
+
+		board_two = round_obj.pairings.get(board_number=2)
+		board_one_players = {round_obj.pairings.get(board_number=1).player_white_id, round_obj.pairings.get(board_number=1).player_black_id}
+		orphan_id = board_two.player_black_id
+
+		response = self.client.post(
+			f'/tournament/{tournament.id}/rounds/{round_obj.id}/remove/{board_two.player_white_id}/'
+		)
+
+		self.assertRedirects(
+			response,
+			f'/tournament/{tournament.id}/rounds/{round_obj.id}/',
+			fetch_redirect_response=False,
+		)
+		removed = Player.objects.get(id=board_two.player_white_id)
+		self.assertTrue(removed.is_withdrawn)
+		self.assertFalse(
+			round_obj.pairings.filter(player_white=removed).exists()
+			or round_obj.pairings.filter(player_black=removed).exists()
+			or round_obj.pairings.filter(bye_player=removed).exists()
+		)
+		# board 1 is untouched
+		board_one = round_obj.pairings.get(board_number=1)
+		self.assertEqual({board_one.player_white_id, board_one.player_black_id}, board_one_players)
+		# the orphan is still seated somewhere
+		self.assertTrue(
+			round_obj.pairings.filter(player_white_id=orphan_id).exists()
+			or round_obj.pairings.filter(player_black_id=orphan_id).exists()
+			or round_obj.pairings.filter(bye_player_id=orphan_id).exists()
+		)
+		# nobody is awarded a forfeit for a round that never started
+		self.assertFalse(round_obj.pairings.filter(is_forfeit=True).exists())
+
+	def test_removing_a_player_is_rejected_once_the_round_starts(self):
+		tournament = self.create_tournament(name='Saturday Swiss')
+		Player.objects.create(tournament=tournament, name='Alice')
+		Player.objects.create(tournament=tournament, name='Bob')
+		self.client.post(f'/tournament/{tournament.id}/rounds/generate/')
+		round_obj = tournament.rounds.get(round_number=1)
+		self.client.post(f'/tournament/{tournament.id}/rounds/{round_obj.id}/start/')
+		pairing = round_obj.pairings.first()
+
+		self.client.post(f'/tournament/{tournament.id}/rounds/{round_obj.id}/remove/{pairing.player_white_id}/')
+
+		self.assertFalse(Player.objects.get(id=pairing.player_white_id).is_withdrawn)
 
 	def test_players_page_disables_start_with_fewer_than_two_active_players(self):
 		tournament = self.create_tournament(name='Saturday Swiss')
@@ -239,23 +360,111 @@ class DirectorFlowTests(TestCase):
 
 		response = self.client.get(f'/tournament/{tournament.id}/players/')
 
-		self.assertContains(response, '<button class="button primary" type="submit" disabled>Start Tournament</button>', html=True)
+		self.assertContains(response, '<button class="button primary" type="submit" disabled>Post Round 1 Pairings</button>', html=True)
 
-	def test_players_page_blocks_adding_players_after_tournament_starts(self):
+	def test_players_page_blocks_adding_players_while_a_round_is_in_progress(self):
 		tournament = self.create_tournament(name='Saturday Swiss', current_round=1)
 		Player.objects.create(tournament=tournament, name='Alice')
-		Round.objects.create(tournament=tournament, round_number=1)
+		Round.objects.create(tournament=tournament, round_number=1, is_started=True)
 
 		response = self.client.post(f'/tournament/{tournament.id}/players/', {'name': 'Late Player'})
 
 		self.assertRedirects(response, f'/tournament/{tournament.id}/players/')
 		self.assertFalse(Player.objects.filter(tournament=tournament, name='Late Player').exists())
 
+	def test_players_page_allows_adding_players_between_rounds(self):
+		tournament = self.create_tournament(name='Saturday Swiss', num_rounds=3, current_round=1)
+		Player.objects.create(tournament=tournament, name='Alice')
+		Round.objects.create(tournament=tournament, round_number=1, is_started=True, is_completed=True)
+
+		response = self.client.post(f'/tournament/{tournament.id}/players/', {'name': 'Late Player'})
+
+		self.assertRedirects(response, f'/tournament/{tournament.id}/players/')
+		self.assertTrue(Player.objects.filter(tournament=tournament, name='Late Player').exists())
+
+	def test_late_player_is_slotted_into_the_open_bye_seat(self):
+		tournament = self.create_tournament(name='Saturday Swiss')
+		for index, name in enumerate(['Alice', 'Bob', 'Cara', 'Dan', 'Erin']):
+			Player.objects.create(tournament=tournament, name=name, initial_rating=1500 - index * 10)
+		self.client.post(f'/tournament/{tournament.id}/rounds/generate/')
+		round_obj = tournament.rounds.get(round_number=1)
+		bye_player_id = round_obj.pairings.get(bye_player__isnull=False).bye_player_id
+		board_one = round_obj.pairings.get(board_number=1)
+		board_one_players = {board_one.player_white_id, board_one.player_black_id}
+
+		response = self.client.post(
+			f'/tournament/{tournament.id}/rounds/{round_obj.id}/add-player/',
+			{'name': 'Late Player', 'initial_rating': ''},
+		)
+
+		self.assertRedirects(
+			response,
+			f'/tournament/{tournament.id}/rounds/{round_obj.id}/',
+			fetch_redirect_response=False,
+		)
+		late = Player.objects.get(tournament=tournament, name='Late Player')
+		# the previously byed player comes off the bye to face the late entry
+		new_board = round_obj.pairings.get(models.Q(player_white=late) | models.Q(player_black=late))
+		self.assertEqual(
+			{new_board.player_white_id, new_board.player_black_id},
+			{late.id, bye_player_id},
+		)
+		self.assertFalse(round_obj.pairings.filter(bye_player__isnull=False).exists())
+		self.assertEqual(
+			{board_one.player_white_id, board_one.player_black_id},
+			board_one_players,
+		)
+
+	def test_late_player_takes_the_bye_when_every_board_is_full(self):
+		tournament = self.create_tournament(name='Saturday Swiss')
+		for name in ['Alice', 'Bob', 'Cara', 'Dan']:
+			Player.objects.create(tournament=tournament, name=name)
+		self.client.post(f'/tournament/{tournament.id}/rounds/generate/')
+		round_obj = tournament.rounds.get(round_number=1)
+
+		self.client.post(
+			f'/tournament/{tournament.id}/rounds/{round_obj.id}/add-player/',
+			{'name': 'Late Player', 'initial_rating': ''},
+		)
+
+		late = Player.objects.get(tournament=tournament, name='Late Player')
+		self.assertTrue(round_obj.pairings.filter(bye_player=late).exists())
+		self.assertEqual(round_obj.pairings.filter(bye_player__isnull=True).count(), 2)
+
+	def test_late_player_is_rejected_once_the_round_starts(self):
+		tournament = self.create_tournament(name='Saturday Swiss')
+		Player.objects.create(tournament=tournament, name='Alice')
+		Player.objects.create(tournament=tournament, name='Bob')
+		self.client.post(f'/tournament/{tournament.id}/rounds/generate/')
+		round_obj = tournament.rounds.get(round_number=1)
+		self.client.post(f'/tournament/{tournament.id}/rounds/{round_obj.id}/start/')
+
+		self.client.post(
+			f'/tournament/{tournament.id}/rounds/{round_obj.id}/add-player/',
+			{'name': 'Late Player', 'initial_rating': ''},
+		)
+
+		self.assertFalse(Player.objects.filter(tournament=tournament, name='Late Player').exists())
+
+	def test_late_player_with_a_duplicate_name_is_rejected(self):
+		tournament = self.create_tournament(name='Saturday Swiss')
+		for name in ['Alice', 'Bob', 'Cara', 'Dan']:
+			Player.objects.create(tournament=tournament, name=name)
+		self.client.post(f'/tournament/{tournament.id}/rounds/generate/')
+		round_obj = tournament.rounds.get(round_number=1)
+
+		self.client.post(
+			f'/tournament/{tournament.id}/rounds/{round_obj.id}/add-player/',
+			{'name': 'Alice', 'initial_rating': ''},
+		)
+
+		self.assertEqual(Player.objects.filter(tournament=tournament, name='Alice').count(), 1)
+
 	def test_withdrawing_a_player_forfeits_their_pending_pairing(self):
 		tournament = Tournament.objects.create(name='Saturday Swiss', current_round=1)
 		alice = Player.objects.create(tournament=tournament, name='Alice')
 		bob = Player.objects.create(tournament=tournament, name='Bob')
-		round_one = Round.objects.create(tournament=tournament, round_number=1)
+		round_one = Round.objects.create(tournament=tournament, round_number=1, is_started=True)
 		pairing = Pairing.objects.create(round=round_one, player_white=alice, player_black=bob)
 
 		alice.withdraw()
@@ -286,6 +495,7 @@ class DirectorFlowTests(TestCase):
 
 		round_obj = tournament.rounds.get(round_number=1)
 		self.assertEqual(round_obj.pairings.count(), 2)
+		self.client.post(f'/tournament/{tournament.id}/rounds/{round_obj.id}/start/')
 		first_pairing, second_pairing = list(round_obj.pairings.all())
 
 		response = self.client.post(

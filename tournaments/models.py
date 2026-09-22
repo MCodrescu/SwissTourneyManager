@@ -35,9 +35,11 @@ class Player(models.Model):
 		return self.name
 
 	def pending_pairing(self):
+		# only rounds that have actually started can be forfeited; draft pairings are re-paired instead
 		return Pairing.objects.filter(
 			models.Q(player_white=self) | models.Q(player_black=self),
 			round__tournament=self.tournament,
+			round__is_started=True,
 			result=Pairing.ResultChoices.PENDING,
 		).select_related('round').order_by('-round__round_number').first()
 
@@ -58,8 +60,10 @@ class Player(models.Model):
 class Round(models.Model):
 	tournament = models.ForeignKey(Tournament, on_delete=models.CASCADE, related_name='rounds')
 	round_number = models.PositiveIntegerField()
+	is_started = models.BooleanField(default=False)
 	is_completed = models.BooleanField(default=False)
 	created_at = models.DateTimeField(default=timezone.now)
+	started_at = models.DateTimeField(blank=True, null=True)
 	completed_at = models.DateTimeField(blank=True, null=True)
 
 	class Meta:
@@ -70,11 +74,15 @@ class Round(models.Model):
 		return f'{self.tournament} - Round {self.round_number}'
 
 	@property
+	def clock_start(self):
+		return self.started_at or self.created_at
+
+	@property
 	def elapsed_time(self):
 		"""Return the completed round duration as H:MM:SS, or None if incomplete."""
 		if self.completed_at is None:
 			return None
-		total_seconds = max(0, int((self.completed_at - self.created_at).total_seconds()))
+		total_seconds = max(0, int((self.completed_at - self.clock_start).total_seconds()))
 		hours, remainder = divmod(total_seconds, 3600)
 		minutes, seconds = divmod(remainder, 60)
 		return f'{hours}:{minutes:02d}:{seconds:02d}'
@@ -94,9 +102,10 @@ class Pairing(models.Model):
 	bye_player = models.ForeignKey(Player, on_delete=models.CASCADE, related_name='bye_pairings', blank=True, null=True)
 	result = models.CharField(max_length=20, choices=ResultChoices.choices, default=ResultChoices.PENDING)
 	is_forfeit = models.BooleanField(default=False)
+	board_number = models.PositiveIntegerField(default=0)
 
 	class Meta:
-		ordering = ['round__round_number', 'id']
+		ordering = ['round__round_number', 'board_number', 'id']
 
 	def __str__(self):
 		if self.bye_player_id:

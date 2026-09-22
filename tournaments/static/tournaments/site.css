@@ -278,6 +278,14 @@ select {
     color: var(--muted);
 }
 
+.pairing-row.draft-row {
+    grid-template-columns: 90px 1fr auto;
+}
+
+.board-actions {
+    justify-self: end;
+}
+
 .standings-preview {
     list-style: none;
     padding: 0;
@@ -399,6 +407,12 @@ select {
     justify-content: flex-end;
 }
 
+.modal-player-list {
+    display: grid;
+    gap: 10px;
+    margin-bottom: 24px;
+}
+
 .button.danger {
     background: var(--rust);
     color: white;
@@ -463,7 +477,8 @@ select {
 
     .two-column,
     .wide-left,
-    .pairing-row {
+    .pairing-row,
+    .pairing-row.draft-row {
         grid-template-columns: 1fr;
     }
 

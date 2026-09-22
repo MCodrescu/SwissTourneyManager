@@ -20,6 +20,10 @@ class PlayerForm(forms.ModelForm):
     class Meta:
         model = Player
         fields = ['name', 'initial_rating']
+        widgets = {
+            'name': forms.TextInput(attrs={'placeholder': 'Player name'}),
+            'initial_rating': forms.NumberInput(attrs={'placeholder': 'Rating (optional)'}),
+        }
 
 
 class PairingResultForm(forms.ModelForm):
