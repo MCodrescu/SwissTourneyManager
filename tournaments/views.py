@@ -337,6 +337,55 @@ def round_detail(request, tournament_id, round_id):
 	return render(request, 'tournaments/round_detail.html', {'tournament': tournament, 'round': round_obj, 'formset': formset})
 
 
+def results_history(request, tournament_id):
+	tournament = _workspace_tournament(request, tournament_id)
+	played = Pairing.objects.filter(
+		round__tournament=tournament,
+		round__is_completed=True,
+	).exclude(result=Pairing.ResultChoices.BYE).select_related('round', 'player_white', 'player_black')
+
+	result_formset = modelformset_factory(Pairing, form=PairingResultForm, extra=0)
+	formset = result_formset(request.POST or None, queryset=played)
+
+	if request.method == 'POST':
+		if not tournament.is_active:
+			messages.error(request, 'Results cannot be changed after the tournament has ended.')
+			return redirect('tournaments:results_history', tournament_id=tournament.id)
+		if formset.is_valid():
+			with transaction.atomic():
+				for form in formset:
+					if 'result' not in form.changed_data:
+						continue
+					# a hand-corrected result supersedes any automatic withdrawal forfeit
+					form.instance.is_forfeit = False
+					form.save()
+			messages.success(request, 'Results updated.')
+			return redirect('tournaments:results_history', tournament_id=tournament.id)
+
+	forms_by_round = {}
+	for form in formset:
+		forms_by_round.setdefault(form.instance.round_id, []).append(form)
+	byes_by_round = {}
+	for pairing in Pairing.objects.filter(
+		round__tournament=tournament,
+		round__is_completed=True,
+		bye_player__isnull=False,
+	).select_related('bye_player'):
+		byes_by_round.setdefault(pairing.round_id, []).append(pairing)
+
+	rounds = [
+		{'round': round_obj, 'forms': forms_by_round.get(round_obj.id, []), 'byes': byes_by_round.get(round_obj.id, [])}
+		for round_obj in tournament.rounds.filter(is_completed=True)
+	]
+
+	return render(request, 'tournaments/results_history.html', {
+		'tournament': tournament,
+		'formset': formset,
+		'rounds': rounds,
+		'can_edit_results': tournament.is_active,
+	})
+
+
 @require_GET
 def standings_view(request, tournament_id):
 	tournament = _workspace_tournament(request, tournament_id)

@@ -517,6 +517,161 @@ class DirectorFlowTests(TestCase):
 		round_obj.refresh_from_db()
 		self.assertTrue(round_obj.is_completed)
 
+	def test_performance_rating_only_counts_games_a_player_actually_played(self):
+		tournament = self.create_tournament(name='Saturday Swiss', num_rounds=2, current_round=2)
+		alice = Player.objects.create(tournament=tournament, name='Alice', initial_rating=1600)
+		bob = Player.objects.create(tournament=tournament, name='Bob', initial_rating=1400)
+		late = Player.objects.create(tournament=tournament, name='Late', initial_rating=1500)
+
+		round_one = Round.objects.create(tournament=tournament, round_number=1, is_started=True, is_completed=True)
+		Pairing.objects.create(
+			round=round_one,
+			player_white=alice,
+			player_black=bob,
+			board_number=1,
+			result=Pairing.ResultChoices.WHITE_WIN,
+		)
+		round_two = Round.objects.create(tournament=tournament, round_number=2, is_started=True, is_completed=True)
+		Pairing.objects.create(
+			round=round_two,
+			player_white=late,
+			player_black=bob,
+			board_number=1,
+			result=Pairing.ResultChoices.WHITE_WIN,
+		)
+		Pairing.objects.create(round=round_two, bye_player=alice, result=Pairing.ResultChoices.BYE)
+
+		rows = {row.player.name: row for row in calculate_standings(tournament)}
+
+		# the late entry is rated on its single played game, not on the rounds it missed
+		self.assertEqual(rows['Late'].games_played, 1)
+		self.assertEqual(rows['Late'].performance_rating, 2200)
+		# a bye is an unplayed game and is excluded from the average
+		self.assertEqual(rows['Alice'].games_played, 1)
+		self.assertEqual(rows['Alice'].byes, 1)
+		self.assertEqual(rows['Alice'].performance_rating, 2200)
+		self.assertEqual(rows['Bob'].games_played, 2)
+		self.assertEqual(rows['Bob'].performance_rating, 750)
+
+	def test_performance_rating_is_none_for_a_late_entry_who_has_only_had_a_bye(self):
+		tournament = self.create_tournament(name='Saturday Swiss', num_rounds=2, current_round=1)
+		alice = Player.objects.create(tournament=tournament, name='Alice', initial_rating=1600)
+		bob = Player.objects.create(tournament=tournament, name='Bob', initial_rating=1400)
+		late = Player.objects.create(tournament=tournament, name='Late', initial_rating=1500)
+		round_one = Round.objects.create(tournament=tournament, round_number=1, is_started=True, is_completed=True)
+		Pairing.objects.create(
+			round=round_one,
+			player_white=alice,
+			player_black=bob,
+			board_number=1,
+			result=Pairing.ResultChoices.WHITE_WIN,
+		)
+		Pairing.objects.create(round=round_one, bye_player=late, result=Pairing.ResultChoices.BYE)
+
+		rows = {row.player.name: row for row in calculate_standings(tournament)}
+
+		self.assertEqual(rows['Late'].score, 1.0)
+		self.assertEqual(rows['Late'].games_played, 0)
+		self.assertIsNone(rows['Late'].performance_rating)
+
+	def test_results_history_lists_completed_rounds_only(self):
+		tournament = self.create_tournament(name='Saturday Swiss', num_rounds=3, current_round=2)
+		alice = Player.objects.create(tournament=tournament, name='Alice')
+		bob = Player.objects.create(tournament=tournament, name='Bob')
+		round_one = Round.objects.create(tournament=tournament, round_number=1, is_started=True, is_completed=True)
+		Pairing.objects.create(
+			round=round_one,
+			player_white=alice,
+			player_black=bob,
+			board_number=1,
+			result=Pairing.ResultChoices.WHITE_WIN,
+		)
+		round_two = Round.objects.create(tournament=tournament, round_number=2, is_started=True)
+		Pairing.objects.create(round=round_two, player_white=bob, player_black=alice, board_number=1)
+
+		response = self.client.get(f'/tournament/{tournament.id}/results/')
+
+		self.assertContains(response, 'Round 1')
+		self.assertNotContains(response, 'Round 2')
+
+	def test_results_history_can_correct_a_result_and_update_standings(self):
+		tournament = self.create_tournament(name='Saturday Swiss', num_rounds=3, current_round=1)
+		alice = Player.objects.create(tournament=tournament, name='Alice')
+		bob = Player.objects.create(tournament=tournament, name='Bob')
+		round_one = Round.objects.create(tournament=tournament, round_number=1, is_started=True, is_completed=True)
+		pairing = Pairing.objects.create(
+			round=round_one,
+			player_white=alice,
+			player_black=bob,
+			board_number=1,
+			result=Pairing.ResultChoices.WHITE_WIN,
+			is_forfeit=True,
+		)
+
+		response = self.client.post(
+			f'/tournament/{tournament.id}/results/',
+			{
+				'form-TOTAL_FORMS': '1',
+				'form-INITIAL_FORMS': '1',
+				'form-MIN_NUM_FORMS': '0',
+				'form-MAX_NUM_FORMS': '1000',
+				'form-0-id': str(pairing.id),
+				'form-0-result': Pairing.ResultChoices.BLACK_WIN,
+			},
+		)
+
+		self.assertRedirects(response, f'/tournament/{tournament.id}/results/')
+		pairing.refresh_from_db()
+		self.assertEqual(pairing.result, Pairing.ResultChoices.BLACK_WIN)
+		self.assertFalse(pairing.is_forfeit)
+		scores = {row.player.name: row.score for row in calculate_standings(tournament)}
+		self.assertEqual(scores['Bob'], 1.0)
+		self.assertEqual(scores['Alice'], 0.0)
+
+	def test_results_history_is_read_only_after_the_tournament_ends(self):
+		tournament = self.create_tournament(name='Saturday Swiss', num_rounds=1, current_round=1)
+		alice = Player.objects.create(tournament=tournament, name='Alice')
+		bob = Player.objects.create(tournament=tournament, name='Bob')
+		round_one = Round.objects.create(tournament=tournament, round_number=1, is_started=True, is_completed=True)
+		pairing = Pairing.objects.create(
+			round=round_one,
+			player_white=alice,
+			player_black=bob,
+			board_number=1,
+			result=Pairing.ResultChoices.WHITE_WIN,
+		)
+		tournament.is_active = False
+		tournament.save(update_fields=['is_active'])
+
+		response = self.client.get(f'/tournament/{tournament.id}/results/')
+		self.assertContains(response, 'White win')
+		self.assertNotContains(response, 'Save Results')
+		self.assertNotContains(response, 'type="radio"')
+
+		response = self.client.post(
+			f'/tournament/{tournament.id}/results/',
+			{
+				'form-TOTAL_FORMS': '1',
+				'form-INITIAL_FORMS': '1',
+				'form-MIN_NUM_FORMS': '0',
+				'form-MAX_NUM_FORMS': '1000',
+				'form-0-id': str(pairing.id),
+				'form-0-result': Pairing.ResultChoices.BLACK_WIN,
+			},
+		)
+
+		self.assertRedirects(response, f'/tournament/{tournament.id}/results/')
+		pairing.refresh_from_db()
+		self.assertEqual(pairing.result, Pairing.ResultChoices.WHITE_WIN)
+
+	def test_results_history_is_scoped_to_the_workspace(self):
+		tournament = self.create_tournament(name='Private Swiss')
+		other_client = self.client_class()
+
+		response = other_client.get(f'/tournament/{tournament.id}/results/')
+
+		self.assertEqual(response.status_code, 404)
+
 	def test_tournament_is_invisible_to_a_different_browser_session(self):
 		tournament = self.create_tournament(name='Private Swiss')
 		other_client = self.client_class()

@@ -413,6 +413,16 @@ select {
     margin-bottom: 24px;
 }
 
+.modal-change-list {
+    color: var(--muted);
+    margin: 0 0 24px;
+    padding-left: 20px;
+}
+
+.modal-change-list li {
+    margin-bottom: 6px;
+}
+
 .button.danger {
     background: var(--rust);
     color: white;

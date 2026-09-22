@@ -22,4 +22,5 @@ urlpatterns = [
     path('tournament/<int:tournament_id>/rounds/<int:round_id>/add-player/', views.round_add_player, name='round_add_player'),
     path('tournament/<int:tournament_id>/rounds/<int:round_id>/remove/<int:player_id>/', views.pairing_remove_player, name='pairing_remove_player'),
     path('tournament/<int:tournament_id>/standings/', views.standings_view, name='standings'),
+    path('tournament/<int:tournament_id>/results/', views.results_history, name='results_history'),
 ]

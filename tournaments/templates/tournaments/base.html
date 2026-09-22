@@ -16,9 +16,9 @@
                 <span class="nav-toggle-label">Menu</span>
             </button>
             <nav id="tournament-navigation">
-                <a href="{% url 'tournaments:tournament_list' %}">Tournaments</a>
                 <a href="{% url 'tournaments:tournament_detail' tournament.id %}">Overview</a>
                 <a href="{% url 'tournaments:player_list' tournament.id %}">Players</a>
+                <a href="{% url 'tournaments:results_history' tournament.id %}">Results</a>
                 <a href="{% url 'tournaments:standings' tournament.id %}">Standings</a>
             </nav>
         {% endif %}
