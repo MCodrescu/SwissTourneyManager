@@ -101,6 +101,44 @@ class StandingsTests(TestCase):
 		self.assertEqual(rows['Bob'].performance_rating, 600)
 
 
+class ModelBehaviorTests(TestCase):
+	def test_pairing_scoring_and_string_helpers_cover_result_paths(self):
+		tournament = Tournament.objects.create(name='Club Night', num_rounds=1)
+		alice = Player.objects.create(tournament=tournament, name='Alice')
+		bob = Player.objects.create(tournament=tournament, name='Bob')
+		cara = Player.objects.create(tournament=tournament, name='Cara')
+		round_obj = Round.objects.create(tournament=tournament, round_number=1)
+
+		white_win = Pairing.objects.create(round=round_obj, player_white=alice, player_black=bob, result=Pairing.ResultChoices.WHITE_WIN)
+		black_win = Pairing.objects.create(round=round_obj, player_white=alice, player_black=bob, result=Pairing.ResultChoices.BLACK_WIN)
+		draw = Pairing.objects.create(round=round_obj, player_white=alice, player_black=bob, result=Pairing.ResultChoices.DRAW)
+		bye = Pairing.objects.create(round=round_obj, bye_player=alice, result=Pairing.ResultChoices.BYE)
+		pending = Pairing.objects.create(round=round_obj, player_white=alice, player_black=bob, result=Pairing.ResultChoices.PENDING)
+
+		self.assertEqual(white_win.score_for(alice), 1.0)
+		self.assertEqual(white_win.score_for(bob), 0.0)
+		self.assertEqual(black_win.score_for(bob), 1.0)
+		self.assertEqual(draw.score_for(alice), 0.5)
+		self.assertEqual(bye.score_for(alice), 1.0)
+		self.assertEqual(pending.score_for(alice), 0.0)
+		self.assertEqual(white_win.opponent_for(alice), bob)
+		self.assertIsNone(white_win.opponent_for(cara))
+		self.assertEqual(str(white_win), 'Alice vs Bob')
+		self.assertEqual(str(bye), 'Alice bye')
+		self.assertIn(Pairing.ResultChoices.WHITE_WIN, Pairing.completed_results())
+		self.assertIn(Pairing.ResultChoices.BYE, Pairing.completed_results())
+
+	def test_player_withdraw_marks_status_even_without_an_active_pending_game(self):
+		tournament = Tournament.objects.create(name='Club Night', num_rounds=1)
+		alice = Player.objects.create(tournament=tournament, name='Alice')
+
+		alice.withdraw()
+
+		alice.refresh_from_db()
+		self.assertTrue(alice.is_withdrawn)
+		self.assertEqual(alice.withdrawn_at_round, 1)
+
+
 class DirectorFlowTests(TestCase):
 	def setUp(self):
 		session = self.client.session
@@ -118,6 +156,19 @@ class DirectorFlowTests(TestCase):
 
 		self.assertRedirects(response, '/')
 		self.assertFalse(Tournament.objects.filter(id=tournament.id).exists())
+
+	def test_invalid_tournament_create_and_edit_forms_are_rejected(self):
+		invalid_create = self.client.post('/new/', {'name': '', 'num_rounds': 4})
+		self.assertEqual(invalid_create.status_code, 200)
+		self.assertContains(invalid_create, 'This field is required.')
+
+		tournament = self.create_tournament(name='Saturday Swiss', num_rounds=4)
+		invalid_edit = self.client.post(
+			f'/tournament/{tournament.id}/edit/',
+			{'name': '', 'num_rounds': 4},
+		)
+		self.assertEqual(invalid_edit.status_code, 200)
+		self.assertContains(invalid_edit, 'This field is required.')
 
 	def test_new_tournament_redirects_to_overview(self):
 		response = self.client.post('/new/', {'name': 'Sunday Swiss', 'num_rounds': 4})
@@ -301,6 +352,40 @@ class DirectorFlowTests(TestCase):
 		self.client.post(f'/tournament/{tournament.id}/rounds/generate/')
 
 		self.assertEqual(tournament.rounds.count(), 1)
+
+	def test_generating_pairings_requires_at_least_two_active_players(self):
+		tournament = self.create_tournament(name='Saturday Swiss')
+		Player.objects.create(tournament=tournament, name='Alice')
+
+		response = self.client.post(f'/tournament/{tournament.id}/rounds/generate/')
+
+		self.assertRedirects(response, f'/tournament/{tournament.id}/players/')
+		self.assertEqual(tournament.rounds.count(), 0)
+
+	def test_start_round_rejects_an_already_started_or_empty_round(self):
+		tournament = self.create_tournament(name='Saturday Swiss')
+		for name in ['Alice', 'Bob']:
+			Player.objects.create(tournament=tournament, name=name)
+		self.client.post(f'/tournament/{tournament.id}/rounds/generate/')
+		round_obj = tournament.rounds.get(round_number=1)
+		self.client.post(f'/tournament/{tournament.id}/rounds/{round_obj.id}/start/')
+
+		response = self.client.post(f'/tournament/{tournament.id}/rounds/{round_obj.id}/start/')
+		self.assertRedirects(response, f'/tournament/{tournament.id}/rounds/{round_obj.id}/')
+
+		empty_tournament = self.create_tournament(name='Empty Swiss')
+		empty_round = Round.objects.create(tournament=empty_tournament, round_number=1)
+		response = self.client.post(f'/tournament/{empty_tournament.id}/rounds/{empty_round.id}/start/')
+		self.assertRedirects(response, f'/tournament/{empty_tournament.id}/rounds/{empty_round.id}/')
+		self.assertFalse(empty_round.is_started)
+
+	def test_end_tournament_early_rejects_already_ended_tournaments(self):
+		tournament = self.create_tournament(name='Saturday Swiss', is_active=False)
+
+		response = self.client.post(f'/tournament/{tournament.id}/end-early/')
+
+		self.assertRedirects(response, f'/tournament/{tournament.id}/')
+		self.assertFalse(tournament.is_active)
 
 	def test_removing_a_player_reseats_their_opponent_without_moving_other_boards(self):
 		tournament = self.create_tournament(name='Saturday Swiss')
