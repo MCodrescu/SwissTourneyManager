@@ -18,6 +18,21 @@
 </section>
 
 <section class="panel">
+    <p class="eyebrow">{% if request.session.director_workspace_key %}Saved workspace{% else %}Temporary workspace{% endif %}</p>
+    <form method="post" action="{% url 'tournaments:director_workspace' %}">
+        {% csrf_token %}
+        {{ director_key_form.as_p }}
+        <button class="button primary" type="submit">Save / Load tournaments</button>
+    </form>
+    {% if request.session.director_workspace_key %}
+        <form method="post" action="{% url 'tournaments:director_leave' %}">
+            {% csrf_token %}
+            <button class="link-button" type="submit">Leave director workspace</button>
+        </form>
+    {% endif %}
+</section>
+
+<section class="panel">
     {% if tournaments %}
         <div class="table-wrap">
             <table>

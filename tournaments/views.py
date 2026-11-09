@@ -8,7 +8,7 @@ from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_GET, require_POST
 
-from .forms import PairingResultForm, PlayerForm, TournamentForm
+from .forms import DirectorKeyForm, PairingResultForm, PlayerForm, TournamentForm
 from .models import Pairing, Player, Round, Tournament
 from .pairing import PlayerCard, generate_pairings
 from .standings import calculate_standings
@@ -20,7 +20,7 @@ ROUND_DETAIL_ROUTE = 'tournaments:round_detail'
 def _workspace_key(request):
 	if not request.session.session_key:
 		request.session.create()
-	return request.session.session_key
+	return request.session.get('director_workspace_key', request.session.session_key)
 
 
 def _workspace_tournament(request, tournament_id):
@@ -34,7 +34,39 @@ def _workspace_tournament(request, tournament_id):
 @require_GET
 def tournament_list(request):
 	tournaments = Tournament.objects.filter(workspace_key=_workspace_key(request))
-	return render(request, 'tournaments/tournament_list.html', {'tournaments': tournaments})
+	return render(request, 'tournaments/tournament_list.html', {
+		'tournaments': tournaments,
+		'director_key_form': DirectorKeyForm(initial={
+			'director_key': request.session.get('director_workspace_key', '').removeprefix('director:'),
+		}),
+	})
+
+
+@require_POST
+def director_workspace(request):
+	form = DirectorKeyForm(request.POST)
+	if form.is_valid():
+		workspace_key = f"director:{form.cleaned_data['director_key']}"
+		with transaction.atomic():
+			if not request.session.get('director_workspace_key'):
+				temporary_tournaments = Tournament.objects.filter(workspace_key=_workspace_key(request))
+				combined_count = temporary_tournaments.count() + Tournament.objects.filter(workspace_key=workspace_key).count()
+				if temporary_tournaments.exists() and combined_count > settings.WORKSPACE_TOURNAMENT_LIMIT:
+					return HttpResponse('This director workspace would exceed its tournament limit.', status=429)
+				temporary_tournaments.update(workspace_key=workspace_key)
+			request.session['director_workspace_key'] = workspace_key
+		messages.success(request, 'Director workspace saved and loaded.')
+		return redirect('tournaments:tournament_list')
+	return render(request, 'tournaments/tournament_list.html', {
+		'tournaments': Tournament.objects.filter(workspace_key=_workspace_key(request)),
+		'director_key_form': form,
+	})
+
+
+@require_POST
+def director_leave(request):
+	request.session.flush()
+	return redirect('tournaments:tournament_list')
 
 
 def tournament_create(request):

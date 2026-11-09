@@ -4,7 +4,7 @@ A Django web app for running simplified Swiss-style chess tournaments. It suppor
 
 ## Requirements
 
-- Python 3.11+
+- Python 3.11-3.13 (Django 5.1 does not support Python 3.14)
 - pip
 
 ## Running locally
@@ -19,7 +19,42 @@ python manage.py runserver
 
 Open http://127.0.0.1:8000/ in your browser.
 
-Each browser session gets its own private, temporary tournament workspace with no account required. Use **Start over** from the tournament list to delete the current workspace. Individual tournaments can also be deleted after confirming in the delete dialog.
+On the tournament list, enter a **Tournament director key** and select **Save / Load tournaments**. A new key creates a saved workspace; entering the same key from another browser reloads its tournaments, players, rounds, and results. Keys are case-insensitive and accept 1-31 letters, numbers, hyphens, or underscores. One key can identify multiple tournaments. Changes save automatically as you submit them.
+
+Anyone who knows or guesses a key can view, change, or delete its tournaments. This is an identifier, not secure authentication; use a distinct key to avoid accidental sharing. Never use your Supabase database password as a director key.
+
+Before entering a key, tournaments belong to a temporary browser workspace. Entering a key moves those temporary tournaments into the saved workspace. Switching between saved keys does not move tournaments. **Leave director workspace** closes access in this browser without deleting data. Saved workspaces survive browser-session expiry and `purge_expired_workspaces`. **Start over** permanently deletes all tournaments under the current key, including for other directors using that key. Individual tournaments can also be deleted after confirming in the delete dialog.
+
+## Supabase Database
+
+1. Create a free Supabase project and keep its database password in your deployment's secret settings.
+2. In the Supabase **Connect** dialog, select the PostgreSQL **Session pooler** connection string (port `5432`). This supports IPv4 hosts. Use the connection string Supabase provides; its username usually looks like `postgres.PROJECT_REF`. URL-encode special characters in the password. Do not use the Supabase project HTTPS URL or an API key.
+3. Set `DATABASE_URL` to that connection string in your Django server's environment. Set `SECRET_KEY` to a random secret, `DEBUG=False`, and `ALLOWED_HOSTS` to your deployed hostname. The values in [.env.example](.env.example) are placeholders; Django does not automatically load this file. For local testing, export the variables in your terminal before running Django. Do not commit real credentials.
+4. Install dependencies and run migrations against Supabase:
+
+	```bash
+	pip install -r requirements.txt
+	python manage.py migrate
+	python manage.py collectstatic --noinput
+	```
+
+5. Restart your Django server with the same environment. Create a tournament under a director key, then enter that key in another browser to verify that it reloads.
+
+Django connects directly to PostgreSQL over TLS; no Supabase JavaScript client or API key is needed. Keep the database URL server-side. If this project only uses Django, disable the Supabase Data API in the project's API settings so Django's tables are not exposed through that separate API. Director keys do not provide database access controls for the Supabase Data API.
+
+Without `DATABASE_URL`, the app continues to use local SQLite. Switching databases does not copy existing SQLite data. To transfer existing local tournaments, first enter a director key for them, then export before setting `DATABASE_URL`:
+
+```bash
+python manage.py dumpdata tournaments --indent 2 --output tournaments-backup.json
+```
+
+After setting `DATABASE_URL` and running migrations, import into an empty Supabase tournament database:
+
+```bash
+python manage.py loaddata tournaments-backup.json
+```
+
+The backup contains player names and director identifiers; keep it private and out of version control. Supabase's free plan has storage limits and may pause inactive projects; check the dashboard before an event. Persistent storage is not a backup, so keep separate exports for important tournaments.
 
 ## Features
 

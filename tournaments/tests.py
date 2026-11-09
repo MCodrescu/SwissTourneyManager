@@ -1,8 +1,13 @@
+import os
+import runpy
+from unittest.mock import patch
+
+from django.conf import settings
 from django.contrib.sessions.models import Session
 from django.core.cache import cache
 from django.core.management import call_command
 from django.db import models
-from django.test import TestCase, override_settings
+from django.test import Client, SimpleTestCase, TestCase, override_settings
 from django.utils import timezone
 
 from .models import Pairing, Player, Round, Tournament
@@ -137,6 +142,96 @@ class ModelBehaviorTests(TestCase):
 		alice.refresh_from_db()
 		self.assertTrue(alice.is_withdrawn)
 		self.assertEqual(alice.withdrawn_at_round, 1)
+
+
+class DatabaseConfigurationTests(SimpleTestCase):
+	def test_supabase_url_uses_postgres_with_tls_and_pooler_compatible_cursors(self):
+		with patch.dict(os.environ, {
+			'DATABASE_URL': 'postgresql://postgres.example:password@pooler.example.com:5432/postgres',
+		}):
+			config = runpy.run_path(str(settings.BASE_DIR / 'chess_tournament' / 'settings.py'))
+		database = config['DATABASES']['default']
+		self.assertEqual(database['ENGINE'], 'django.db.backends.postgresql')
+		self.assertEqual(database['HOST'], 'pooler.example.com')
+		self.assertEqual(database['NAME'], 'postgres')
+		self.assertEqual(database['OPTIONS']['sslmode'], 'require')
+		self.assertTrue(database['DISABLE_SERVER_SIDE_CURSORS'])
+		self.assertTrue(database['CONN_HEALTH_CHECKS'])
+
+	def test_local_development_defaults_to_sqlite(self):
+		with patch.dict(os.environ, {'DATABASE_URL': ''}):
+			config = runpy.run_path(str(settings.BASE_DIR / 'chess_tournament' / 'settings.py'))
+		self.assertEqual(config['DATABASES']['default']['ENGINE'], 'django.db.backends.sqlite3')
+
+
+class DirectorKeyTests(TestCase):
+	def setUp(self):
+		cache.clear()
+
+	def test_key_reloads_tournament_and_results_in_another_browser(self):
+		self.client.post('/director/', {'director_key': 'Club-Saturday'})
+		self.client.post('/new/', {'name': 'Saved Swiss', 'num_rounds': 4})
+		tournament = Tournament.objects.get(name='Saved Swiss')
+		alice = Player.objects.create(tournament=tournament, name='Alice')
+		bob = Player.objects.create(tournament=tournament, name='Bob')
+		round_obj = Round.objects.create(tournament=tournament, round_number=1, is_started=True)
+		pairing = Pairing.objects.create(round=round_obj, player_white=alice, player_black=bob, result=Pairing.ResultChoices.DRAW)
+		other_browser = Client()
+		self.assertEqual(other_browser.get(f'/tournament/{tournament.id}/').status_code, 404)
+		other_browser.post('/director/', {'director_key': 'club-saturday'})
+		self.assertContains(other_browser.get('/'), 'Saved Swiss')
+		self.assertEqual(other_browser.get(f'/tournament/{tournament.id}/').status_code, 200)
+		self.assertEqual(tournament.workspace_key, 'director:club-saturday')
+		self.assertEqual(Pairing.objects.get(pk=pairing.pk).result, Pairing.ResultChoices.DRAW)
+
+	def test_entering_key_preserves_temporary_tournaments(self):
+		self.client.post('/new/', {'name': 'Temporary Swiss', 'num_rounds': 4})
+		tournament = Tournament.objects.get(name='Temporary Swiss')
+		self.client.post('/director/', {'director_key': 'saved-club'})
+		tournament.refresh_from_db()
+		self.assertEqual(tournament.workspace_key, 'director:saved-club')
+		self.assertContains(self.client.get('/'), 'Temporary Swiss')
+
+	def test_switching_and_leaving_do_not_delete_or_move_saved_tournaments(self):
+		self.client.post('/director/', {'director_key': 'first-club'})
+		self.client.post('/new/', {'name': 'First Swiss', 'num_rounds': 4})
+		tournament = Tournament.objects.get(name='First Swiss')
+		self.client.post('/director/', {'director_key': 'second-club'})
+		self.assertNotContains(self.client.get('/'), 'First Swiss')
+		self.assertEqual(self.client.get(f'/tournament/{tournament.id}/').status_code, 404)
+		self.client.post('/director/leave/')
+		self.client.post('/director/', {'director_key': 'first-club'})
+		self.assertContains(self.client.get('/'), 'First Swiss')
+
+	def test_invalid_keys_do_not_change_workspace(self):
+		for key in ['', 'bad key', 'x' * 32, 'director:collision']:
+			response = self.client.post('/director/', {'director_key': key})
+			self.assertEqual(response.status_code, 200)
+			self.assertTrue(response.context['director_key_form'].errors)
+			self.assertNotIn('director_workspace_key', self.client.session)
+		self.assertEqual(self.client.get('/director/').status_code, 405)
+		self.assertEqual(self.client.get('/director/leave/').status_code, 405)
+
+	@override_settings(WORKSPACE_TOURNAMENT_LIMIT=1)
+	def test_saving_temporary_tournaments_respects_destination_limit(self):
+		Tournament.objects.create(workspace_key='director:full-club', name='Existing Swiss')
+		self.client.post('/new/', {'name': 'Temporary Swiss', 'num_rounds': 4})
+		response = self.client.post('/director/', {'director_key': 'full-club'})
+		self.assertEqual(response.status_code, 429)
+		self.assertNotIn('director_workspace_key', self.client.session)
+		self.assertContains(self.client.get('/'), 'Temporary Swiss')
+		self.assertNotContains(self.client.get('/'), 'Existing Swiss')
+
+	def test_saved_tournaments_survive_session_cleanup(self):
+		self.client.post('/director/', {'director_key': 'lasting-club'})
+		self.client.post('/new/', {'name': 'Lasting Swiss', 'num_rounds': 4})
+		Session.objects.filter(session_key=self.client.session.session_key).update(
+			expire_date=timezone.now() - timezone.timedelta(days=1),
+		)
+		call_command('purge_expired_workspaces')
+		other_browser = Client()
+		other_browser.post('/director/', {'director_key': 'lasting-club'})
+		self.assertContains(other_browser.get('/'), 'Lasting Swiss')
 
 
 class DirectorFlowTests(TestCase):

@@ -4,6 +4,7 @@ __pycache__/
 .venv/
 venv/
 .env
+tournaments-backup.json
 db.sqlite3
 staticfiles/
 .coverage

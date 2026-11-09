@@ -4,6 +4,19 @@ from django.conf import settings
 from .models import Pairing, Player, Tournament
 
 
+class DirectorKeyForm(forms.Form):
+    director_key = forms.RegexField(
+        regex=r'^[a-zA-Z0-9_-]+$',
+        max_length=31,
+        label='Tournament director key',
+        error_messages={'invalid': 'Use only letters, numbers, hyphens, and underscores.'},
+        widget=forms.TextInput(attrs={'autocomplete': 'off', 'placeholder': 'e.g. club-saturday'}),
+    )
+
+    def clean_director_key(self):
+        return self.cleaned_data['director_key'].lower()
+
+
 class TournamentForm(forms.ModelForm):
     class Meta:
         model = Tournament
