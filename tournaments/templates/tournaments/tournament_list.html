@@ -22,7 +22,7 @@
     <form method="post" action="{% url 'tournaments:director_workspace' %}">
         {% csrf_token %}
         {{ director_key_form.as_p }}
-        <button class="button primary" type="submit">Save / Load tournaments</button>
+        <button class="button primary" type="submit"{% if request.session.director_workspace_key %} disabled{% endif %}>Save / Load tournaments</button>
     </form>
     {% if request.session.director_workspace_key %}
         <form method="post" action="{% url 'tournaments:director_leave' %}">

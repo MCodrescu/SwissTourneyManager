@@ -23,7 +23,7 @@ On the tournament list, enter a **Tournament director key** and select **Save / 
 
 Anyone who knows or guesses a key can view, change, or delete its tournaments. This is an identifier, not secure authentication; use a distinct key to avoid accidental sharing. Never use your Supabase database password as a director key.
 
-Before entering a key, tournaments belong to a temporary browser workspace. Entering a key moves those temporary tournaments into the saved workspace. Switching between saved keys does not move tournaments. **Leave director workspace** closes access in this browser without deleting data. Saved workspaces survive browser-session expiry and `purge_expired_workspaces`. **Start over** permanently deletes all tournaments under the current key, including for other directors using that key. Individual tournaments can also be deleted after confirming in the delete dialog.
+Before entering a key, tournaments belong to a temporary browser workspace. Entering a key moves those temporary tournaments into the saved workspace. The key field and **Save / Load tournaments** button stay disabled while a workspace is active. Select **Leave director workspace** to enable key entry again and switch workspaces; leaving does not delete or move saved tournaments. Saved workspaces survive browser-session expiry and `purge_expired_workspaces`. **Start over** permanently deletes all tournaments under the current key, including for other directors using that key. Individual tournaments can also be deleted after confirming in the delete dialog.
 
 ## Supabase Database
 

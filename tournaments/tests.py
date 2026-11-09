@@ -175,8 +175,9 @@ class DirectorKeyTests(TestCase):
 		tournament = Tournament.objects.get(name='Saved Swiss')
 		for path in ['/', f'/tournament/{tournament.id}/', f'/tournament/{tournament.id}/players/']:
 			self.assertContains(self.client.get(path), 'Workspace: <strong>club-saturday</strong>')
-		response = self.client.post('/director/', {'director_key': 'invalid key'})
+		response = self.client.post('/director/', {'director_key': 'invalid key'}, follow=True)
 		self.assertContains(response, 'Workspace: <strong>club-saturday</strong>')
+		self.client.post('/director/leave/')
 		self.client.post('/director/', {'director_key': 'other-club'})
 		self.assertContains(self.client.get('/'), 'Workspace: <strong>other-club</strong>')
 		self.client.post('/director/leave/')
@@ -210,12 +211,33 @@ class DirectorKeyTests(TestCase):
 		self.client.post('/director/', {'director_key': 'first-club'})
 		self.client.post('/new/', {'name': 'First Swiss', 'num_rounds': 4})
 		tournament = Tournament.objects.get(name='First Swiss')
+		self.client.post('/director/leave/')
 		self.client.post('/director/', {'director_key': 'second-club'})
 		self.assertNotContains(self.client.get('/'), 'First Swiss')
 		self.assertEqual(self.client.get(f'/tournament/{tournament.id}/').status_code, 404)
 		self.client.post('/director/leave/')
 		self.client.post('/director/', {'director_key': 'first-club'})
 		self.assertContains(self.client.get('/'), 'First Swiss')
+
+	def test_director_key_is_locked_until_leaving_workspace(self):
+		response = self.client.get('/')
+		self.assertFalse(response.context['director_key_form'].fields['director_key'].disabled)
+		self.client.post('/director/', {'director_key': 'first-club'})
+		for _ in range(2):
+			response = self.client.get('/')
+			self.assertTrue(response.context['director_key_form'].fields['director_key'].disabled)
+			self.assertEqual(response.context['director_key_form']['director_key'].value(), 'first-club')
+			self.assertContains(response, 'type="submit" disabled>Save / Load tournaments')
+		response = self.client.post('/director/', {'director_key': 'second-club'})
+		self.assertRedirects(response, '/')
+		self.assertEqual(self.client.session['director_workspace_key'], 'director:first-club')
+		self.client.post('/director/leave/')
+		response = self.client.get('/')
+		self.assertFalse(response.context['director_key_form'].fields['director_key'].disabled)
+		self.assertFalse(response.context['director_key_form']['director_key'].value())
+		self.assertNotContains(response, 'type="submit" disabled>Save / Load tournaments')
+		self.client.post('/director/', {'director_key': 'second-club'})
+		self.assertEqual(self.client.session['director_workspace_key'], 'director:second-club')
 
 	def test_invalid_keys_do_not_change_workspace(self):
 		for key in ['', 'bad key', 'x' * 32, 'director:collision']:

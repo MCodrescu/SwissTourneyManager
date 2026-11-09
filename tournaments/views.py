@@ -34,16 +34,19 @@ def _workspace_tournament(request, tournament_id):
 @require_GET
 def tournament_list(request):
 	tournaments = Tournament.objects.filter(workspace_key=_workspace_key(request))
+	director_key = request.session.get('director_workspace_key', '')
+	form = DirectorKeyForm(initial={'director_key': director_key.removeprefix('director:')})
+	form.fields['director_key'].disabled = bool(director_key)
 	return render(request, 'tournaments/tournament_list.html', {
 		'tournaments': tournaments,
-		'director_key_form': DirectorKeyForm(initial={
-			'director_key': request.session.get('director_workspace_key', '').removeprefix('director:'),
-		}),
+		'director_key_form': form,
 	})
 
 
 @require_POST
 def director_workspace(request):
+	if request.session.get('director_workspace_key'):
+		return redirect('tournaments:tournament_list')
 	form = DirectorKeyForm(request.POST)
 	if form.is_valid():
 		workspace_key = f"director:{form.cleaned_data['director_key']}"
