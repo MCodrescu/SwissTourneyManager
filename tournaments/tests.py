@@ -168,6 +168,20 @@ class DirectorKeyTests(TestCase):
 	def setUp(self):
 		cache.clear()
 
+	def test_workspace_indicator_tracks_active_key_across_pages(self):
+		self.assertNotContains(self.client.get('/'), 'class="workspace-indicator"')
+		self.client.post('/director/', {'director_key': 'Club-Saturday'})
+		self.client.post('/new/', {'name': 'Saved Swiss', 'num_rounds': 4})
+		tournament = Tournament.objects.get(name='Saved Swiss')
+		for path in ['/', f'/tournament/{tournament.id}/', f'/tournament/{tournament.id}/players/']:
+			self.assertContains(self.client.get(path), 'Workspace: <strong>club-saturday</strong>')
+		response = self.client.post('/director/', {'director_key': 'invalid key'})
+		self.assertContains(response, 'Workspace: <strong>club-saturday</strong>')
+		self.client.post('/director/', {'director_key': 'other-club'})
+		self.assertContains(self.client.get('/'), 'Workspace: <strong>other-club</strong>')
+		self.client.post('/director/leave/')
+		self.assertNotContains(self.client.get('/'), 'class="workspace-indicator"')
+
 	def test_key_reloads_tournament_and_results_in_another_browser(self):
 		self.client.post('/director/', {'director_key': 'Club-Saturday'})
 		self.client.post('/new/', {'name': 'Saved Swiss', 'num_rounds': 4})

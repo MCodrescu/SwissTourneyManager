@@ -9,7 +9,12 @@
 </head>
 <body>
     <header class="site-header">
-        <a class="brand" href="{% url 'tournaments:tournament_list' %}">Swiss Tourney Manager</a>
+        <div class="site-identity">
+            <a class="brand" href="{% url 'tournaments:tournament_list' %}">Swiss Tourney Manager</a>
+            {% if request.session.director_workspace_key %}
+                <p class="workspace-indicator">Workspace: <strong>{{ request.session.director_workspace_key|slice:"9:" }}</strong></p>
+            {% endif %}
+        </div>
         {% if tournament %}
             <button class="nav-toggle" type="button" aria-controls="tournament-navigation" aria-expanded="false">
                 <span class="nav-toggle-icon" aria-hidden="true">&#9776;</span>

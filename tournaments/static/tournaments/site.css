@@ -41,6 +41,7 @@ a:hover {
     border-bottom: 1px solid var(--line);
     display: flex;
     justify-content: space-between;
+    gap: 16px;
     padding: 16px clamp(18px, 4vw, 56px);
     position: sticky;
     top: 0;
@@ -50,6 +51,17 @@ a:hover {
 .brand {
     color: var(--ink);
     font-size: 1.15rem;
+}
+
+.site-identity {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.workspace-indicator {
+    color: var(--forest);
+    font-size: 0.875rem;
+    margin: 4px 0 0;
 }
 
 nav {
