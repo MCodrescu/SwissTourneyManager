@@ -61,6 +61,7 @@ The backup contains player names and director identifiers; keep it private and o
 - Create tournaments with a manually selected round count and edit the name or round count before the first round starts.
 - Delete tournaments with a confirmation dialog.
 - Add and edit players with optional initial ratings.
+- Reuse players from previous tournaments in the same director workspace through the roster's **Existing player** dropdown. The most recently saved name and rating are copied into the new tournament; past results and withdrawal status remain unchanged.
 - Withdraw players from future rounds without deleting historical pairings.
 - Generate simplified Swiss pairings by score group while avoiding rematches when possible.
 - Assign rotating full-point byes to the lowest-scoring eligible player.

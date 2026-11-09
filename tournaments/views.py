@@ -8,7 +8,7 @@ from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_GET, require_POST
 
-from .forms import DirectorKeyForm, PairingResultForm, PlayerForm, TournamentForm
+from .forms import DirectorKeyForm, ExistingPlayerForm, PairingResultForm, PlayerForm, TournamentForm
 from .models import Pairing, Player, Round, Tournament
 from .pairing import PlayerCard, generate_pairings
 from .standings import calculate_standings
@@ -142,12 +142,24 @@ def player_list(request, tournament_id):
 	active_player_count = players.filter(is_withdrawn=False).count()
 	pending_round = _pending_round(tournament)
 	roster_locked = not tournament.is_active or _active_round(tournament) is not None
-	form = PlayerForm(request.POST or None)
+	adding_existing = request.method == 'POST' and request.POST.get('action') == 'add_existing'
+	form = PlayerForm(None if adding_existing else request.POST or None)
+	existing_player_form = ExistingPlayerForm(
+		request.POST if adding_existing else None,
+		tournament=tournament,
+	)
 	if request.method == 'POST':
 		if roster_locked:
 			messages.error(request, 'Players cannot be added while a round is in progress.')
 			return redirect(PLAYER_LIST_ROUTE, tournament_id=tournament.id)
-		if form.is_valid():
+		valid_selection = not adding_existing or existing_player_form.is_valid()
+		if adding_existing and valid_selection:
+			selected_player = existing_player_form.cleaned_data['existing_player']
+			form = PlayerForm({
+				'name': selected_player.name,
+				'initial_rating': selected_player.initial_rating,
+			})
+		if valid_selection and form.is_valid():
 			if players.count() >= settings.TOURNAMENT_PLAYER_LIMIT:
 				return HttpResponse('This tournament has reached its player limit.', status=429)
 			_add_player(request, tournament, form, pending_round)
@@ -159,6 +171,7 @@ def player_list(request, tournament_id):
 		'roster_locked': roster_locked,
 		'pending_round': pending_round,
 		'form': form,
+		'existing_player_form': existing_player_form,
 	})
 
 

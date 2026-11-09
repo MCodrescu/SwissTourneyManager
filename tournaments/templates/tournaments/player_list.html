@@ -56,6 +56,13 @@
         {% else %}
             <form method="post" class="stacked-form">
                 {% csrf_token %}
+                <input type="hidden" name="action" value="add_existing">
+                {{ existing_player_form.as_p }}
+                <button class="button primary" type="submit"{% if not existing_player_form.fields.existing_player.queryset %} disabled{% endif %}>Add existing player</button>
+            </form>
+            <h3>New player</h3>
+            <form method="post" class="stacked-form">
+                {% csrf_token %}
                 {{ form.as_p }}
                 <button class="button primary" type="submit">Add</button>
             </form>

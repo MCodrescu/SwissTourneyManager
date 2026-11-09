@@ -270,6 +270,90 @@ class DirectorKeyTests(TestCase):
 		self.assertContains(other_browser.get('/'), 'Lasting Swiss')
 
 
+class ExistingPlayerTests(TestCase):
+	def setUp(self):
+		cache.clear()
+		self.client.post('/director/', {'director_key': 'club'})
+		self.previous = Tournament.objects.create(workspace_key='director:club', name='Previous Swiss', is_active=False)
+		self.tournament = Tournament.objects.create(workspace_key='director:club', name='New Swiss')
+		self.player = Player.objects.create(
+			tournament=self.previous, name='Alice', initial_rating=1500,
+			is_withdrawn=True, withdrawn_at_round=2,
+		)
+		self.path = f'/tournament/{self.tournament.id}/players/'
+
+	def add_existing(self, player_id):
+		return self.client.post(self.path, {'action': 'add_existing', 'existing_player': player_id})
+
+	def test_selection_copies_name_and_rating_without_changing_previous_player(self):
+		self.assertContains(self.client.get(self.path), 'Alice - 1500 (Previous Swiss)')
+		response = self.add_existing(self.player.pk)
+		self.assertRedirects(response, self.path)
+		added = self.tournament.players.get(name='Alice')
+		self.assertNotEqual(added.pk, self.player.pk)
+		self.assertEqual(added.initial_rating, 1500)
+		self.assertFalse(added.is_withdrawn)
+		self.assertIsNone(added.withdrawn_at_round)
+		self.assertFalse(added.white_pairings.exists())
+		self.player.refresh_from_db()
+		self.assertTrue(self.player.is_withdrawn)
+		self.assertEqual(self.player.tournament_id, self.previous.pk)
+
+	def test_dropdown_uses_latest_entry_per_name_and_excludes_current_roster(self):
+		latest = Player.objects.create(tournament=self.tournament, name='Alice', initial_rating=1600)
+		self.assertFalse(self.client.get(self.path).context['existing_player_form'].fields['existing_player'].queryset.exists())
+		latest.tournament = Tournament.objects.create(workspace_key='director:club', name='Recent Swiss')
+		latest.save()
+		options = self.client.get(self.path).context['existing_player_form'].fields['existing_player'].queryset
+		self.assertEqual(list(options), [latest])
+		self.assertRedirects(self.add_existing(latest.pk), self.path)
+		self.assertEqual(self.tournament.players.get(name='Alice').initial_rating, 1600)
+		self.assertEqual(self.add_existing(latest.pk).status_code, 200)
+		self.assertEqual(self.tournament.players.count(), 1)
+
+	def test_other_workspace_and_invalid_selections_are_rejected(self):
+		other = Tournament.objects.create(workspace_key='director:other', name='Other Swiss')
+		private_player = Player.objects.create(tournament=other, name='Private Player')
+		self.assertNotContains(self.client.get(self.path), 'Private Player')
+		for player_id in [private_player.pk, 999999, '']:
+			response = self.add_existing(player_id)
+			self.assertEqual(response.status_code, 200)
+			self.assertTrue(response.context['existing_player_form'].errors)
+		self.assertFalse(self.tournament.players.exists())
+
+	def test_unrated_player_can_be_reused(self):
+		self.player.initial_rating = None
+		self.player.save()
+		self.assertRedirects(self.add_existing(self.player.pk), self.path)
+		self.assertIsNone(self.tournament.players.get().initial_rating)
+
+	def test_active_round_and_closed_tournament_block_existing_players(self):
+		round_obj = Round.objects.create(tournament=self.tournament, round_number=1, is_started=True)
+		self.assertRedirects(self.add_existing(self.player.pk), self.path)
+		round_obj.is_completed = True
+		round_obj.save()
+		self.tournament.is_active = False
+		self.tournament.save()
+		self.assertRedirects(self.add_existing(self.player.pk), self.path)
+		self.assertFalse(self.tournament.players.exists())
+
+	@override_settings(TOURNAMENT_PLAYER_LIMIT=1)
+	def test_existing_players_respect_roster_limit(self):
+		Player.objects.create(tournament=self.tournament, name='Bob')
+		self.assertEqual(self.add_existing(self.player.pk).status_code, 429)
+		self.assertEqual(self.tournament.players.count(), 1)
+
+	def test_existing_player_is_added_to_draft_pairings(self):
+		for name in ['Bob', 'Cara', 'Dan']:
+			Player.objects.create(tournament=self.tournament, name=name)
+		self.client.post(f'/tournament/{self.tournament.pk}/rounds/generate/')
+		self.assertRedirects(self.add_existing(self.player.pk), self.path)
+		added = self.tournament.players.get(name='Alice')
+		round_obj = self.tournament.rounds.get()
+		self.assertFalse(round_obj.pairings.filter(bye_player__isnull=False).exists())
+		self.assertTrue(round_obj.pairings.filter(models.Q(player_white=added) | models.Q(player_black=added)).exists())
+
+
 class DirectorFlowTests(TestCase):
 	def setUp(self):
 		session = self.client.session
