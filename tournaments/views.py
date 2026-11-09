@@ -142,6 +142,11 @@ def player_list(request, tournament_id):
 	active_player_count = players.filter(is_withdrawn=False).count()
 	pending_round = _pending_round(tournament)
 	roster_locked = not tournament.is_active or _active_round(tournament) is not None
+	roster_lock_message = (
+		'Players cannot be added after the tournament is over.'
+		if not tournament.is_active
+		else 'Players cannot be added while a round is in progress.'
+	)
 	adding_existing = request.method == 'POST' and request.POST.get('action') == 'add_existing'
 	form = PlayerForm(None if adding_existing else request.POST or None)
 	existing_player_form = ExistingPlayerForm(
@@ -150,7 +155,7 @@ def player_list(request, tournament_id):
 	)
 	if request.method == 'POST':
 		if roster_locked:
-			messages.error(request, 'Players cannot be added while a round is in progress.')
+			messages.error(request, roster_lock_message)
 			return redirect(PLAYER_LIST_ROUTE, tournament_id=tournament.id)
 		valid_selection = not adding_existing or existing_player_form.is_valid()
 		if adding_existing and valid_selection:
@@ -169,6 +174,7 @@ def player_list(request, tournament_id):
 		'players': players,
 		'active_player_count': active_player_count,
 		'roster_locked': roster_locked,
+		'roster_lock_message': roster_lock_message,
 		'pending_round': pending_round,
 		'form': form,
 		'existing_player_form': existing_player_form,

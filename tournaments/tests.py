@@ -332,12 +332,29 @@ class ExistingPlayerTests(TestCase):
 
 	def test_active_round_and_closed_tournament_block_existing_players(self):
 		round_obj = Round.objects.create(tournament=self.tournament, round_number=1, is_started=True)
+		self.assertContains(self.client.get(self.path), 'Players cannot be added while a round is in progress.')
 		self.assertRedirects(self.add_existing(self.player.pk), self.path)
 		round_obj.is_completed = True
 		round_obj.save()
 		self.tournament.is_active = False
 		self.tournament.save()
+		response = self.client.get(self.path)
+		self.assertContains(response, 'Players cannot be added after the tournament is over.')
+		self.assertNotContains(response, 'Players cannot be added while a round is in progress.')
 		self.assertRedirects(self.add_existing(self.player.pk), self.path)
+		self.assertFalse(self.tournament.players.exists())
+
+	def test_ended_tournament_with_unfinished_round_uses_closed_message(self):
+		Round.objects.create(tournament=self.tournament, round_number=1, is_started=True)
+		self.tournament.is_active = False
+		self.tournament.save()
+		for payload in [
+			{'name': 'New Player'},
+			{'action': 'add_existing', 'existing_player': self.player.pk},
+		]:
+			response = self.client.post(self.path, payload, follow=True)
+			self.assertContains(response, 'Players cannot be added after the tournament is over.')
+			self.assertNotContains(response, 'Players cannot be added while a round is in progress.')
 		self.assertFalse(self.tournament.players.exists())
 
 	@override_settings(TOURNAMENT_PLAYER_LIMIT=1)

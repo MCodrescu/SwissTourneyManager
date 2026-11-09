@@ -52,7 +52,7 @@
     <section class="panel">
         <h2>Add player</h2>
         {% if roster_locked %}
-            <p>Players cannot be added while a round is in progress.</p>
+            <p>{{ roster_lock_message }}</p>
         {% else %}
             <form method="post" class="stacked-form">
                 {% csrf_token %}
