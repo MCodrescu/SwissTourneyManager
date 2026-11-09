@@ -101,6 +101,10 @@ nav {
     padding: 24px;
 }
 
+.director-workspace-panel {
+    margin-bottom: 24px;
+}
+
 .narrow {
     margin: 0 auto;
     max-width: 560px;

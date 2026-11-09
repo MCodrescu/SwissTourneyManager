@@ -17,7 +17,7 @@
     </div>
 </section>
 
-<section class="panel">
+<section class="panel director-workspace-panel">
     <p class="eyebrow">{% if request.session.director_workspace_key %}Saved workspace{% else %}Temporary workspace{% endif %}</p>
     <form method="post" action="{% url 'tournaments:director_workspace' %}">
         {% csrf_token %}
