@@ -286,7 +286,10 @@ class ExistingPlayerTests(TestCase):
 		return self.client.post(self.path, {'action': 'add_existing', 'existing_player': player_id})
 
 	def test_selection_copies_name_and_rating_without_changing_previous_player(self):
-		self.assertContains(self.client.get(self.path), 'Alice - 1500 (Previous Swiss)')
+		roster = self.client.get(self.path)
+		self.assertContains(roster, 'Alice - 1500 (Previous Swiss)')
+		self.assertContains(roster, '<label for="id_initial_rating">ELO Rating:</label>', html=True)
+		self.assertNotContains(roster, 'Initial rating:')
 		response = self.add_existing(self.player.pk)
 		self.assertRedirects(response, self.path)
 		added = self.tournament.players.get(name='Alice')
