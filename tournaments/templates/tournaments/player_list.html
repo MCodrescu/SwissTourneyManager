@@ -51,6 +51,7 @@
     </section>
     <section class="panel">
         <h2>Add player</h2>
+        <p><a href="{% url 'tournaments:saved_player_list' %}">Manage player directory</a></p>
         {% if roster_locked %}
             <p>{{ roster_lock_message }}</p>
         {% else %}

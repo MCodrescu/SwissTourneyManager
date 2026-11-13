@@ -7,13 +7,14 @@
         <h1>Tournaments</h1>
     </div>
     <div class="actions">
-        {% if tournaments %}
+        {% if tournaments or has_saved_players %}
             <form id="resetForm" method="post" action="{% url 'tournaments:workspace_reset' %}">
                 {% csrf_token %}
             </form>
             <button id="startOverBtn" class="link-button" type="button">Start over</button>
         {% endif %}
         <a class="button primary" href="{% url 'tournaments:tournament_create' %}">New tournament</a>
+        <a class="button" href="{% url 'tournaments:saved_player_list' %}">Player directory</a>
     </div>
 </section>
 
@@ -85,7 +86,7 @@
 <dialog id="resetModal" class="modal" aria-labelledby="resetModalTitle">
     <div class="modal-content">
         <h2 id="resetModalTitle">Confirm Start Over</h2>
-        <p>Are you sure you want to clear all tournaments? This action cannot be undone.</p>
+        <p>Are you sure you want to clear all tournaments and the player directory? This action cannot be undone.</p>
         <div class="modal-actions">
             <button id="cancelReset" class="button" type="button">Cancel</button>
             <button id="confirmReset" class="button danger" type="submit" form="resetForm">Start over</button>

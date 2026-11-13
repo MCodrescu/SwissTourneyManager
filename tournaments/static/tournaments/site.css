@@ -105,6 +105,15 @@ nav {
     margin-bottom: 24px;
 }
 
+.director-workspace-panel label {
+    display: block;
+    margin-bottom: 8px;
+}
+
+.director-workspace-panel form + form {
+    margin-top: 12px;
+}
+
 .director-workspace-panel :disabled {
     cursor: not-allowed;
     opacity: 0.6;

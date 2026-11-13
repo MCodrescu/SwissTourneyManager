@@ -6,10 +6,10 @@ from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
-from django.views.decorators.http import require_GET, require_POST
+from django.views.decorators.http import require_GET, require_POST, require_http_methods
 
-from .forms import DirectorKeyForm, ExistingPlayerForm, PairingResultForm, PlayerForm, TournamentForm
-from .models import Pairing, Player, Round, Tournament
+from .forms import DirectorKeyForm, ExistingPlayerForm, PairingResultForm, PlayerForm, SavedPlayerForm, TournamentForm
+from .models import Pairing, Player, Round, SavedPlayer, Tournament
 from .pairing import PlayerCard, generate_pairings
 from .standings import calculate_standings
 
@@ -40,6 +40,7 @@ def tournament_list(request):
 	return render(request, 'tournaments/tournament_list.html', {
 		'tournaments': tournaments,
 		'director_key_form': form,
+		'has_saved_players': SavedPlayer.objects.filter(workspace_key=_workspace_key(request)).exists(),
 	})
 
 
@@ -52,17 +53,26 @@ def director_workspace(request):
 		workspace_key = f"director:{form.cleaned_data['director_key']}"
 		with transaction.atomic():
 			if not request.session.get('director_workspace_key'):
-				temporary_tournaments = Tournament.objects.filter(workspace_key=_workspace_key(request))
+				temporary_key = _workspace_key(request)
+				temporary_tournaments = Tournament.objects.filter(workspace_key=temporary_key)
 				combined_count = temporary_tournaments.count() + Tournament.objects.filter(workspace_key=workspace_key).count()
 				if temporary_tournaments.exists() and combined_count > settings.WORKSPACE_TOURNAMENT_LIMIT:
 					return HttpResponse('This director workspace would exceed its tournament limit.', status=429)
 				temporary_tournaments.update(workspace_key=workspace_key)
+				for player in SavedPlayer.objects.filter(workspace_key=temporary_key):
+					SavedPlayer.objects.update_or_create(
+						workspace_key=workspace_key,
+						name=player.name,
+						defaults={'initial_rating': player.initial_rating},
+					)
+				SavedPlayer.objects.filter(workspace_key=temporary_key).delete()
 			request.session['director_workspace_key'] = workspace_key
 		messages.success(request, 'Director workspace saved and loaded.')
 		return redirect('tournaments:tournament_list')
 	return render(request, 'tournaments/tournament_list.html', {
 		'tournaments': Tournament.objects.filter(workspace_key=_workspace_key(request)),
 		'director_key_form': form,
+		'has_saved_players': SavedPlayer.objects.filter(workspace_key=_workspace_key(request)).exists(),
 	})
 
 
@@ -70,6 +80,49 @@ def director_workspace(request):
 def director_leave(request):
 	request.session.flush()
 	return redirect('tournaments:tournament_list')
+
+
+@require_http_methods(['GET', 'POST'])
+def saved_player_list(request):
+	workspace_key = _workspace_key(request)
+	form = SavedPlayerForm(
+		request.POST if request.method == 'POST' else None,
+		instance=SavedPlayer(workspace_key=workspace_key),
+	)
+	if request.method == 'POST' and form.is_valid():
+		form.save()
+		messages.success(request, 'Player added to the directory and available for future tournaments.')
+		return redirect('tournaments:saved_player_list')
+	return render(request, 'tournaments/saved_player_list.html', {
+		'players': SavedPlayer.objects.filter(workspace_key=workspace_key),
+		'form': form,
+	})
+
+
+@require_http_methods(['GET', 'POST'])
+def saved_player_edit(request, player_id):
+	player = get_object_or_404(SavedPlayer, pk=player_id, workspace_key=_workspace_key(request))
+	form = SavedPlayerForm(request.POST if request.method == 'POST' else None, instance=player)
+	if request.method == 'POST' and form.is_valid():
+		form.save()
+		messages.success(request, 'Saved player updated. Past tournament entries are unchanged.')
+		return redirect('tournaments:saved_player_list')
+	return render(request, 'tournaments/form.html', {
+		'form': form,
+		'title': f'Edit saved player: {player.name}',
+		'notice': 'Changes apply to future player selection only. Past tournament entries are unchanged.',
+		'cancel_url': reverse('tournaments:saved_player_list'),
+	})
+
+
+@require_http_methods(['GET', 'POST'])
+def saved_player_delete(request, player_id):
+	player = get_object_or_404(SavedPlayer, pk=player_id, workspace_key=_workspace_key(request))
+	if request.method == 'POST':
+		player.delete()
+		messages.success(request, 'Player removed from the directory. Past tournament entries are unchanged.')
+		return redirect('tournaments:saved_player_list')
+	return render(request, 'tournaments/saved_player_confirm_delete.html', {'player': player})
 
 
 def tournament_create(request):
@@ -449,7 +502,10 @@ def standings_view(request, tournament_id):
 
 @require_POST
 def workspace_reset(request):
-	Tournament.objects.filter(workspace_key=_workspace_key(request)).delete()
+	workspace_key = _workspace_key(request)
+	with transaction.atomic():
+		Tournament.objects.filter(workspace_key=workspace_key).delete()
+		SavedPlayer.objects.filter(workspace_key=workspace_key).delete()
 	request.session.flush()
 	messages.success(request, 'Your workspace has been cleared.')
 	return redirect('tournaments:tournament_list')
@@ -465,6 +521,14 @@ def _active_round(tournament):
 	return tournament.rounds.filter(is_started=True, is_completed=False).order_by('-round_number').first()
 
 
+def _save_directory_player(player):
+	SavedPlayer.objects.update_or_create(
+		workspace_key=player.tournament.workspace_key,
+		name=player.name,
+		defaults={'initial_rating': player.initial_rating},
+	)
+
+
 def _add_player(request, tournament, form, pending_round):
 	"""Save a new player, seating them in the pending round's open slot when there is one."""
 	name = form.cleaned_data['name']
@@ -476,6 +540,7 @@ def _add_player(request, tournament, form, pending_round):
 		player = form.save(commit=False)
 		player.tournament = tournament
 		player.save()
+		_save_directory_player(player)
 		if pending_round is not None:
 			_reseat_unpaired_players(pending_round, tournament)
 

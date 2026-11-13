@@ -20,6 +20,21 @@ class Tournament(models.Model):
 		return self.name
 
 
+class SavedPlayer(models.Model):
+	workspace_key = models.CharField(max_length=40, db_index=True)
+	name = models.CharField(max_length=200)
+	initial_rating = models.PositiveIntegerField(blank=True, null=True)
+
+	class Meta:
+		ordering = ['name']
+		constraints = [
+			models.UniqueConstraint(fields=['workspace_key', 'name'], name='unique_saved_player_workspace_name'),
+		]
+
+	def __str__(self):
+		return self.name
+
+
 class Player(models.Model):
 	tournament = models.ForeignKey(Tournament, on_delete=models.CASCADE, related_name='players')
 	name = models.CharField(max_length=200)

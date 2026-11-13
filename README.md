@@ -23,7 +23,17 @@ On the tournament list, enter a **Tournament director key** and select **Save / 
 
 Anyone who knows or guesses a key can view, change, or delete its tournaments. This is an identifier, not secure authentication; use a distinct key to avoid accidental sharing. Never use your Supabase database password as a director key.
 
-Before entering a key, tournaments belong to a temporary browser workspace. Entering a key moves those temporary tournaments into the saved workspace. The key field and **Save / Load tournaments** button stay disabled while a workspace is active. Select **Leave director workspace** to enable key entry again and switch workspaces; leaving does not delete or move saved tournaments. Saved workspaces survive browser-session expiry and `purge_expired_workspaces`. **Start over** permanently deletes all tournaments under the current key, including for other directors using that key. Individual tournaments can also be deleted after confirming in the delete dialog.
+Before entering a key, tournaments belong to a temporary browser workspace. Entering a key moves those temporary tournaments and their player directory into the saved workspace. If both directories have the same player name, the temporary directory's rating takes precedence. The key field and **Save / Load tournaments** button stay disabled while a workspace is active. Select **Leave director workspace** to enable key entry again and switch workspaces; leaving does not delete or move saved tournaments or their directory. Saved workspaces survive browser-session expiry and `purge_expired_workspaces`. **Start over** permanently deletes all tournaments and the player directory under the current key, including for other directors using that key. Individual tournaments can also be deleted after confirming in the delete dialog; their saved players remain in the directory.
+
+## Player directory
+
+Select **Player directory** on the tournament list, or **Manage player directory** on a tournament's roster, to add players, edit saved player names and ELO ratings, or remove players from future selection. The **Add player** form saves a name and optional ELO rating without requiring a tournament or adding the player to any roster. Duplicate names in the same directory are rejected; use **Edit** to update an existing saved player. Removal requires confirmation. The directory belongs to the current director workspace and is available across browsers using the same director key.
+
+Directory edits and removals never change existing tournament rosters, withdrawal status, pairings, results, or standings. The roster's **Existing player** dropdown copies the directory's current name and rating into a new tournament entry. Players already on that roster by name are excluded. Editing a player on a tournament roster changes only that tournament entry, not the directory.
+
+Adding a new player to a tournament, including a late entry to posted pairings, saves their name and rating in the directory. Adding the same name again through a tournament updates its saved rating. After removing a directory entry, you can save that player again using the directory's **Add player** form or by adding them as a new player to a tournament. Temporary directories expire with their browser sessions; use a director key to keep yours.
+
+Run `python manage.py migrate` after updating. The directory migration imports players from existing tournaments once, using the latest-added tournament entry for each name within each workspace. Existing tournament data remains unchanged.
 
 ## Supabase Database
 
@@ -61,7 +71,8 @@ The backup contains player names and director identifiers; keep it private and o
 - Create tournaments with a manually selected round count and edit the name or round count before the first round starts.
 - Delete tournaments with a confirmation dialog.
 - Add and edit players with optional initial ratings.
-- Reuse players from previous tournaments in the same director workspace through the roster's **Existing player** dropdown. The most recently saved name and rating are copied into the new tournament; past results and withdrawal status remain unchanged.
+- Manage a workspace-level player directory with name/rating editing and confirmed removal, without changing tournament history.
+- Reuse saved players in the same director workspace through the roster's **Existing player** dropdown. The directory's current name and rating are copied into the new tournament; past results and withdrawal status remain unchanged.
 - Withdraw players from future rounds without deleting historical pairings.
 - Generate simplified Swiss pairings by score group while avoiding rematches when possible.
 - Assign rotating full-point byes to the lowest-scoring eligible player.

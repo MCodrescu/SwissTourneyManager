@@ -1,0 +1,16 @@
+{% extends 'tournaments/base.html' %}
+{% block title %}Remove saved player{% endblock %}
+{% block content %}
+<section class="panel narrow form-panel">
+    <h1>Remove saved player</h1>
+    <p>Remove "{{ player.name }}" from the player directory?</p>
+    <p>They will no longer appear in future player selection. Past tournament rosters, pairings, and results will remain unchanged. You can save them again using the directory's Add player form or by adding them as a new player to a tournament.</p>
+    <form method="post">
+        {% csrf_token %}
+        <div class="actions">
+            <button class="button danger" type="submit">Remove player</button>
+            <a class="button" href="{% url 'tournaments:saved_player_list' %}">Cancel</a>
+        </div>
+    </form>
+</section>
+{% endblock %}

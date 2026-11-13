@@ -1,8 +1,6 @@
 from django import forms
 from django.conf import settings
-from django.db.models import Max
-
-from .models import Pairing, Player, Tournament
+from .models import Pairing, Player, SavedPlayer, Tournament
 
 
 class DirectorKeyForm(forms.Form):
@@ -41,28 +39,38 @@ class PlayerForm(forms.ModelForm):
         }
 
 
+class SavedPlayerForm(PlayerForm):
+    class Meta(PlayerForm.Meta):
+        model = SavedPlayer
+
+    def clean_name(self):
+        name = self.cleaned_data['name']
+        if SavedPlayer.objects.filter(
+            workspace_key=self.instance.workspace_key,
+            name=name,
+        ).exclude(pk=self.instance.pk).exists():
+            raise forms.ValidationError('A player with this name is already in your directory.')
+        return name
+
+
 class ExistingPlayerForm(forms.Form):
     existing_player = forms.ModelChoiceField(
-        queryset=Player.objects.none(),
+        queryset=SavedPlayer.objects.none(),
         label='Existing player',
         empty_label='Select a player',
     )
 
     def __init__(self, *args, tournament, **kwargs):
         super().__init__(*args, **kwargs)
-        available_players = Player.objects.filter(
-            tournament__workspace_key=tournament.workspace_key,
-        ).exclude(tournament=tournament).exclude(name__in=tournament.players.values('name'))
-        latest_entries = available_players.order_by().values('name').annotate(latest_id=Max('id')).values('latest_id')
-        self.fields['existing_player'].queryset = available_players.filter(
-            pk__in=latest_entries,
-        ).select_related('tournament').order_by('name')
+        self.fields['existing_player'].queryset = SavedPlayer.objects.filter(
+            workspace_key=tournament.workspace_key,
+        ).exclude(name__in=tournament.players.values('name'))
         self.fields['existing_player'].label_from_instance = self.player_label
 
     @staticmethod
     def player_label(player):
         rating = player.initial_rating if player.initial_rating is not None else 'Unrated'
-        return f'{player.name} - {rating} ({player.tournament.name})'
+        return f'{player.name} - {rating}'
 
 
 class PairingResultForm(forms.ModelForm):

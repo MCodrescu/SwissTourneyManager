@@ -6,11 +6,12 @@ from django.conf import settings
 from django.contrib.sessions.models import Session
 from django.core.cache import cache
 from django.core.management import call_command
-from django.db import models
-from django.test import Client, SimpleTestCase, TestCase, override_settings
+from django.db import connection, models
+from django.db.migrations.executor import MigrationExecutor
+from django.test import Client, SimpleTestCase, TestCase, TransactionTestCase, override_settings
 from django.utils import timezone
 
-from .models import Pairing, Player, Round, Tournament
+from .models import Pairing, Player, Round, SavedPlayer, Tournament
 from .pairing import PlayerCard, generate_pairings, validate_no_duplicate_players
 from .standings import calculate_standings
 
@@ -280,6 +281,7 @@ class ExistingPlayerTests(TestCase):
 			tournament=self.previous, name='Alice', initial_rating=1500,
 			is_withdrawn=True, withdrawn_at_round=2,
 		)
+		self.saved_player = SavedPlayer.objects.create(workspace_key='director:club', name='Alice', initial_rating=1500)
 		self.path = f'/tournament/{self.tournament.id}/players/'
 
 	def add_existing(self, player_id):
@@ -287,10 +289,10 @@ class ExistingPlayerTests(TestCase):
 
 	def test_selection_copies_name_and_rating_without_changing_previous_player(self):
 		roster = self.client.get(self.path)
-		self.assertContains(roster, 'Alice - 1500 (Previous Swiss)')
+		self.assertContains(roster, 'Alice - 1500')
 		self.assertContains(roster, '<label for="id_initial_rating">ELO Rating:</label>', html=True)
 		self.assertNotContains(roster, 'Initial rating:')
-		response = self.add_existing(self.player.pk)
+		response = self.add_existing(self.saved_player.pk)
 		self.assertRedirects(response, self.path)
 		added = self.tournament.players.get(name='Alice')
 		self.assertNotEqual(added.pk, self.player.pk)
@@ -302,21 +304,22 @@ class ExistingPlayerTests(TestCase):
 		self.assertTrue(self.player.is_withdrawn)
 		self.assertEqual(self.player.tournament_id, self.previous.pk)
 
-	def test_dropdown_uses_latest_entry_per_name_and_excludes_current_roster(self):
+	def test_dropdown_uses_directory_rating_and_excludes_current_roster(self):
 		latest = Player.objects.create(tournament=self.tournament, name='Alice', initial_rating=1600)
 		self.assertFalse(self.client.get(self.path).context['existing_player_form'].fields['existing_player'].queryset.exists())
 		latest.tournament = Tournament.objects.create(workspace_key='director:club', name='Recent Swiss')
 		latest.save()
+		self.saved_player.initial_rating = 1700
+		self.saved_player.save()
 		options = self.client.get(self.path).context['existing_player_form'].fields['existing_player'].queryset
-		self.assertEqual(list(options), [latest])
-		self.assertRedirects(self.add_existing(latest.pk), self.path)
-		self.assertEqual(self.tournament.players.get(name='Alice').initial_rating, 1600)
-		self.assertEqual(self.add_existing(latest.pk).status_code, 200)
+		self.assertEqual(list(options), [self.saved_player])
+		self.assertRedirects(self.add_existing(self.saved_player.pk), self.path)
+		self.assertEqual(self.tournament.players.get(name='Alice').initial_rating, 1700)
+		self.assertEqual(self.add_existing(self.saved_player.pk).status_code, 200)
 		self.assertEqual(self.tournament.players.count(), 1)
 
 	def test_other_workspace_and_invalid_selections_are_rejected(self):
-		other = Tournament.objects.create(workspace_key='director:other', name='Other Swiss')
-		private_player = Player.objects.create(tournament=other, name='Private Player')
+		private_player = SavedPlayer.objects.create(workspace_key='director:other', name='Private Player')
 		self.assertNotContains(self.client.get(self.path), 'Private Player')
 		for player_id in [private_player.pk, 999999, '']:
 			response = self.add_existing(player_id)
@@ -325,15 +328,15 @@ class ExistingPlayerTests(TestCase):
 		self.assertFalse(self.tournament.players.exists())
 
 	def test_unrated_player_can_be_reused(self):
-		self.player.initial_rating = None
-		self.player.save()
-		self.assertRedirects(self.add_existing(self.player.pk), self.path)
+		self.saved_player.initial_rating = None
+		self.saved_player.save()
+		self.assertRedirects(self.add_existing(self.saved_player.pk), self.path)
 		self.assertIsNone(self.tournament.players.get().initial_rating)
 
 	def test_active_round_and_closed_tournament_block_existing_players(self):
 		round_obj = Round.objects.create(tournament=self.tournament, round_number=1, is_started=True)
 		self.assertContains(self.client.get(self.path), 'Players cannot be added while a round is in progress.')
-		self.assertRedirects(self.add_existing(self.player.pk), self.path)
+		self.assertRedirects(self.add_existing(self.saved_player.pk), self.path)
 		round_obj.is_completed = True
 		round_obj.save()
 		self.tournament.is_active = False
@@ -341,7 +344,7 @@ class ExistingPlayerTests(TestCase):
 		response = self.client.get(self.path)
 		self.assertContains(response, 'Players cannot be added after the tournament is over.')
 		self.assertNotContains(response, 'Players cannot be added while a round is in progress.')
-		self.assertRedirects(self.add_existing(self.player.pk), self.path)
+		self.assertRedirects(self.add_existing(self.saved_player.pk), self.path)
 		self.assertFalse(self.tournament.players.exists())
 
 	def test_ended_tournament_with_unfinished_round_uses_closed_message(self):
@@ -350,7 +353,7 @@ class ExistingPlayerTests(TestCase):
 		self.tournament.save()
 		for payload in [
 			{'name': 'New Player'},
-			{'action': 'add_existing', 'existing_player': self.player.pk},
+			{'action': 'add_existing', 'existing_player': self.saved_player.pk},
 		]:
 			response = self.client.post(self.path, payload, follow=True)
 			self.assertContains(response, 'Players cannot be added after the tournament is over.')
@@ -360,18 +363,270 @@ class ExistingPlayerTests(TestCase):
 	@override_settings(TOURNAMENT_PLAYER_LIMIT=1)
 	def test_existing_players_respect_roster_limit(self):
 		Player.objects.create(tournament=self.tournament, name='Bob')
-		self.assertEqual(self.add_existing(self.player.pk).status_code, 429)
+		self.assertEqual(self.add_existing(self.saved_player.pk).status_code, 429)
 		self.assertEqual(self.tournament.players.count(), 1)
 
 	def test_existing_player_is_added_to_draft_pairings(self):
 		for name in ['Bob', 'Cara', 'Dan']:
 			Player.objects.create(tournament=self.tournament, name=name)
 		self.client.post(f'/tournament/{self.tournament.pk}/rounds/generate/')
-		self.assertRedirects(self.add_existing(self.player.pk), self.path)
+		self.assertRedirects(self.add_existing(self.saved_player.pk), self.path)
 		added = self.tournament.players.get(name='Alice')
 		round_obj = self.tournament.rounds.get()
 		self.assertFalse(round_obj.pairings.filter(bye_player__isnull=False).exists())
 		self.assertTrue(round_obj.pairings.filter(models.Q(player_white=added) | models.Q(player_black=added)).exists())
+
+
+class SavedPlayerDirectoryTests(TestCase):
+	def setUp(self):
+		cache.clear()
+		self.client.post('/director/', {'director_key': 'club'})
+		self.tournament = Tournament.objects.create(workspace_key='director:club', name='Past Swiss', is_active=False)
+		self.player = Player.objects.create(
+			tournament=self.tournament, name='Alice', initial_rating=1500,
+			is_withdrawn=True, withdrawn_at_round=2,
+		)
+		self.opponent = Player.objects.create(tournament=self.tournament, name='Bob', initial_rating=1600)
+		self.round = Round.objects.create(
+			tournament=self.tournament, round_number=1, is_started=True, is_completed=True,
+		)
+		self.pairing = Pairing.objects.create(
+			round=self.round, player_white=self.player, player_black=self.opponent,
+			result=Pairing.ResultChoices.DRAW,
+		)
+		self.saved = SavedPlayer.objects.create(workspace_key='director:club', name='Alice', initial_rating=1500)
+		self.list_path = '/director/players/'
+		self.edit_path = f'{self.list_path}{self.saved.pk}/edit/'
+		self.remove_path = f'{self.list_path}{self.saved.pk}/remove/'
+
+	def assert_history_unchanged(self):
+		self.player.refresh_from_db()
+		self.pairing.refresh_from_db()
+		self.assertEqual(self.player.name, 'Alice')
+		self.assertEqual(self.player.initial_rating, 1500)
+		self.assertTrue(self.player.is_withdrawn)
+		self.assertEqual(self.player.withdrawn_at_round, 2)
+		self.assertEqual(self.pairing.player_white_id, self.player.pk)
+		self.assertEqual(self.pairing.player_black_id, self.opponent.pk)
+		self.assertEqual(self.pairing.result, Pairing.ResultChoices.DRAW)
+		self.assertEqual(self.tournament.players.count(), 2)
+		self.assertEqual(calculate_standings(self.tournament)[0].score, 0.5)
+
+	def test_directory_links_and_listing(self):
+		self.assertContains(self.client.get('/'), f'href="{self.list_path}"')
+		self.assertContains(self.client.get(f'/tournament/{self.tournament.pk}/players/'), 'Manage player directory')
+		response = self.client.get(self.list_path)
+		self.assertContains(response, 'Alice')
+		self.assertContains(response, '1500')
+		self.assertContains(response, self.edit_path)
+		self.assertContains(response, self.remove_path)
+
+	def test_directory_add_saves_player_for_future_reuse_without_changing_history(self):
+		response = self.client.post(self.list_path, {'name': 'Cara', 'initial_rating': 1750})
+		self.assertRedirects(response, self.list_path)
+		saved = SavedPlayer.objects.get(workspace_key='director:club', name='Cara')
+		self.assertEqual(saved.initial_rating, 1750)
+		self.assert_history_unchanged()
+		new_tournament = Tournament.objects.create(workspace_key='director:club', name='Future Swiss')
+		path = f'/tournament/{new_tournament.pk}/players/'
+		self.assertContains(self.client.get(path), 'Cara - 1750')
+		self.assertRedirects(self.client.post(path, {
+			'action': 'add_existing', 'existing_player': saved.pk,
+		}), path)
+		self.assertEqual(new_tournament.players.get().name, 'Cara')
+
+	def test_directory_add_needs_no_tournament_and_accepts_blank_or_zero_rating(self):
+		other_client = Client()
+		other_client.post('/director/', {'director_key': 'empty-club'})
+		for name, rating in [('Unrated Player', ''), ('Zero Player', 0)]:
+			self.assertRedirects(other_client.post(self.list_path, {
+				'name': name, 'initial_rating': rating,
+			}), self.list_path)
+		self.assertIsNone(SavedPlayer.objects.get(workspace_key='director:empty-club', name='Unrated Player').initial_rating)
+		self.assertEqual(SavedPlayer.objects.get(workspace_key='director:empty-club', name='Zero Player').initial_rating, 0)
+		self.assertFalse(Tournament.objects.filter(workspace_key='director:empty-club').exists())
+		self.assertContains(other_client.get('/'), 'id="startOverBtn"')
+		other_client.post('/reset/')
+		self.assertFalse(SavedPlayer.objects.filter(workspace_key='director:empty-club').exists())
+
+	def test_invalid_directory_add_and_duplicate_names_show_errors_without_overwriting(self):
+		for payload in [
+			{}, {'name': ''}, {'name': 'Alice', 'initial_rating': 1700},
+			{'name': 'Bad', 'initial_rating': -1},
+			{'name': 'Bad', 'initial_rating': 'bad'}, {'name': 'x' * 201},
+		]:
+			with self.subTest(payload=payload):
+				response = self.client.post(self.list_path, payload)
+				self.assertEqual(response.status_code, 200)
+				self.assertTrue(response.context['form'].errors)
+				self.assertContains(response, 'Alice')
+		self.assertEqual(SavedPlayer.objects.filter(workspace_key='director:club').count(), 1)
+		self.saved.refresh_from_db()
+		self.assertEqual(self.saved.initial_rating, 1500)
+
+	def test_directory_add_uses_current_workspace_and_allows_same_name_in_other_workspace(self):
+		other_client = Client()
+		other_client.post('/director/', {'director_key': 'other'})
+		self.assertRedirects(other_client.post(self.list_path, {
+			'name': 'Alice', 'initial_rating': 1900, 'workspace_key': 'director:club',
+		}), self.list_path)
+		self.assertEqual(SavedPlayer.objects.get(workspace_key='director:other', name='Alice').initial_rating, 1900)
+		self.saved.refresh_from_db()
+		self.assertEqual(self.saved.initial_rating, 1500)
+
+	def test_edit_changes_future_reuse_only(self):
+		response = self.client.post(self.edit_path, {'name': 'Alicia', 'initial_rating': 1750})
+		self.assertRedirects(response, self.list_path)
+		self.saved.refresh_from_db()
+		self.assertEqual(self.saved.name, 'Alicia')
+		self.assertEqual(self.saved.initial_rating, 1750)
+		self.assert_history_unchanged()
+		new_tournament = Tournament.objects.create(workspace_key='director:club', name='Future Swiss')
+		path = f'/tournament/{new_tournament.pk}/players/'
+		self.assertContains(self.client.get(path), 'Alicia - 1750')
+		self.assertRedirects(self.client.post(path, {
+			'action': 'add_existing', 'existing_player': self.saved.pk,
+		}), path)
+		added = new_tournament.players.get()
+		self.assertEqual(added.name, 'Alicia')
+		self.assertEqual(added.initial_rating, 1750)
+		self.assertFalse(added.is_withdrawn)
+
+	def test_remove_requires_confirmation_preserves_history_and_stays_removed(self):
+		self.assertContains(self.client.get(self.remove_path), 'Remove "Alice"')
+		self.assertTrue(SavedPlayer.objects.filter(pk=self.saved.pk).exists())
+		self.assertRedirects(self.client.post(self.remove_path), self.list_path)
+		self.assert_history_unchanged()
+		for _ in range(2):
+			self.assertContains(self.client.get(self.list_path), 'No saved players yet.')
+		new_tournament = Tournament.objects.create(workspace_key='director:club', name='Future Swiss')
+		path = f'/tournament/{new_tournament.pk}/players/'
+		self.assertNotContains(self.client.get(path), 'Alice - 1500')
+		response = self.client.post(path, {'action': 'add_existing', 'existing_player': self.saved.pk})
+		self.assertTrue(response.context['existing_player_form'].errors)
+		self.assertFalse(new_tournament.players.exists())
+		self.client.post(path, {'name': 'Alice', 'initial_rating': 1650})
+		self.assertEqual(SavedPlayer.objects.get(workspace_key='director:club', name='Alice').initial_rating, 1650)
+
+	def test_invalid_and_duplicate_edits_show_errors(self):
+		SavedPlayer.objects.create(workspace_key='director:club', name='Bob')
+		for payload in [
+			{}, {'name': ''}, {'name': 'Alice', 'initial_rating': -1},
+			{'name': 'Alice', 'initial_rating': 'bad'}, {'name': 'Bob'},
+		]:
+			response = self.client.post(self.edit_path, payload)
+			self.assertEqual(response.status_code, 200)
+			self.assertTrue(response.context['form'].errors)
+		self.saved.refresh_from_db()
+		self.assertEqual(self.saved.name, 'Alice')
+		self.assertEqual(self.saved.initial_rating, 1500)
+		self.assert_history_unchanged()
+
+	def test_unrated_and_zero_ratings(self):
+		self.client.post(self.edit_path, {'name': 'Alice', 'initial_rating': ''})
+		self.assertContains(self.client.get(self.list_path), 'Unrated')
+		self.client.post(self.edit_path, {'name': 'Alice', 'initial_rating': 0})
+		self.saved.refresh_from_db()
+		self.assertEqual(self.saved.initial_rating, 0)
+		self.assertContains(self.client.get(self.list_path), '<td>0</td>', html=True)
+
+	def test_other_workspaces_cannot_list_edit_or_remove_players(self):
+		other_client = Client()
+		other_client.post('/director/', {'director_key': 'other'})
+		SavedPlayer.objects.create(workspace_key='director:other', name='Alice')
+		for client in [other_client, Client()]:
+			self.assertNotContains(client.get(self.list_path), '1500')
+			for path in [self.edit_path, self.remove_path]:
+				self.assertEqual(client.get(path).status_code, 404)
+				self.assertEqual(client.post(path, {'name': 'Changed'}).status_code, 404)
+		self.assertEqual(self.client.delete(self.remove_path).status_code, 405)
+		self.assertEqual(self.client.delete(self.list_path).status_code, 405)
+		self.assertTrue(SavedPlayer.objects.filter(pk=self.saved.pk).exists())
+
+	def test_directory_reloads_after_leaving_and_in_another_browser(self):
+		other_client = Client()
+		other_client.post('/director/', {'director_key': 'club'})
+		self.assertContains(other_client.get(self.list_path), 'Alice')
+		self.client.post('/director/leave/')
+		self.assertNotContains(self.client.get(self.list_path), 'Alice')
+		self.client.post('/director/', {'director_key': 'club'})
+		self.assertContains(self.client.get(self.list_path), 'Alice')
+
+	def test_new_and_late_entries_save_directory_and_update_rating(self):
+		new_tournament = Tournament.objects.create(workspace_key='director:club', name='Future Swiss')
+		path = f'/tournament/{new_tournament.pk}/players/'
+		self.client.post(path, {'name': 'Alice', 'initial_rating': 1700})
+		self.saved.refresh_from_db()
+		self.assertEqual(self.saved.initial_rating, 1700)
+		self.assertEqual(SavedPlayer.objects.filter(workspace_key='director:club', name='Alice').count(), 1)
+		self.client.post(path, {'name': 'Bob'})
+		self.client.post(f'/tournament/{new_tournament.pk}/rounds/generate/')
+		draft = new_tournament.rounds.get()
+		self.client.post(f'/tournament/{new_tournament.pk}/rounds/{draft.pk}/add-player/', {
+			'name': 'Cara', 'initial_rating': 1400,
+		})
+		self.assertEqual(SavedPlayer.objects.get(workspace_key='director:club', name='Cara').initial_rating, 1400)
+		self.assert_history_unchanged()
+
+	def test_tournament_roster_edits_do_not_overwrite_directory(self):
+		self.client.post(f'/tournament/{self.tournament.pk}/players/{self.player.pk}/edit/', {
+			'name': 'Alice in history', 'initial_rating': 1800,
+		})
+		self.saved.refresh_from_db()
+		self.assertEqual(self.saved.name, 'Alice')
+		self.assertEqual(self.saved.initial_rating, 1500)
+
+	def test_deleted_tournament_keeps_directory_and_reset_removes_it(self):
+		private = SavedPlayer.objects.create(workspace_key='director:other', name='Private')
+		self.client.post(f'/tournament/{self.tournament.pk}/delete/')
+		self.assertContains(self.client.get(self.list_path), 'Alice')
+		self.client.post('/reset/')
+		self.assertFalse(SavedPlayer.objects.filter(workspace_key='director:club').exists())
+		self.assertTrue(SavedPlayer.objects.filter(pk=private.pk).exists())
+
+	def test_temporary_directory_merges_into_saved_workspace(self):
+		temporary_client = Client()
+		temporary_client.post('/new/', {'name': 'Temporary Swiss', 'num_rounds': 4})
+		temporary_key = temporary_client.session.session_key
+		tournament = Tournament.objects.get(workspace_key=temporary_key)
+		temporary_client.post(f'/tournament/{tournament.pk}/players/', {'name': 'Alice', 'initial_rating': 1900})
+		temporary_client.post(f'/tournament/{tournament.pk}/players/', {'name': 'Cara'})
+		temporary_client.post('/director/', {'director_key': 'club'})
+		self.assertFalse(SavedPlayer.objects.filter(workspace_key=temporary_key).exists())
+		self.saved.refresh_from_db()
+		self.assertEqual(self.saved.initial_rating, 1900)
+		self.assertContains(self.client.get(self.list_path), 'Cara')
+		tournament.refresh_from_db()
+		self.assertEqual(tournament.workspace_key, 'director:club')
+
+
+class SavedPlayerMigrationTests(TransactionTestCase):
+	def test_migration_imports_latest_entries_per_workspace_without_changing_history(self):
+		old_target = [('tournaments', '0006_round_start_state_and_board_numbers')]
+		new_target = [('tournaments', '0007_saved_player_directory')]
+		executor = MigrationExecutor(connection)
+		executor.migrate(old_target)
+		try:
+			apps = executor.loader.project_state(old_target).apps
+			HistoricalTournament = apps.get_model('tournaments', 'Tournament')
+			HistoricalPlayer = apps.get_model('tournaments', 'Player')
+			old = HistoricalTournament.objects.create(workspace_key='director:club', name='Old')
+			recent = HistoricalTournament.objects.create(workspace_key='director:club', name='Recent')
+			other = HistoricalTournament.objects.create(workspace_key='director:other', name='Other')
+			first = HistoricalPlayer.objects.create(tournament=old, name='Alice', initial_rating=1500)
+			HistoricalPlayer.objects.create(tournament=recent, name='Alice', initial_rating=1600)
+			HistoricalPlayer.objects.create(tournament=other, name='Alice', initial_rating=1700)
+			HistoricalPlayer.objects.create(tournament=recent, name='Bob')
+			executor = MigrationExecutor(connection)
+			executor.migrate(new_target)
+			self.assertEqual(SavedPlayer.objects.count(), 3)
+			self.assertEqual(SavedPlayer.objects.get(workspace_key='director:club', name='Alice').initial_rating, 1600)
+			self.assertEqual(SavedPlayer.objects.get(workspace_key='director:other', name='Alice').initial_rating, 1700)
+			self.assertIsNone(SavedPlayer.objects.get(name='Bob').initial_rating)
+			self.assertEqual(Player.objects.get(pk=first.pk).initial_rating, 1500)
+			self.assertEqual(Player.objects.count(), 4)
+		finally:
+			MigrationExecutor(connection).migrate(new_target)
 
 
 class DirectorFlowTests(TestCase):
@@ -1040,6 +1295,9 @@ class WorkspaceCleanupTests(TestCase):
 			workspace_key=active_session.session_key,
 			name='Active Swiss',
 		)
+		expired_player = SavedPlayer.objects.create(workspace_key=expired_session.session_key, name='Expired')
+		active_player = SavedPlayer.objects.create(workspace_key=active_session.session_key, name='Active')
+		saved_player = SavedPlayer.objects.create(workspace_key='director:club', name='Saved')
 
 		call_command('purge_expired_workspaces')
 
@@ -1047,6 +1305,9 @@ class WorkspaceCleanupTests(TestCase):
 		self.assertTrue(Tournament.objects.filter(id=active_tournament.id).exists())
 		self.assertFalse(Session.objects.filter(session_key=expired_session.session_key).exists())
 		self.assertTrue(Session.objects.filter(session_key=active_session.session_key).exists())
+		self.assertFalse(SavedPlayer.objects.filter(pk=expired_player.pk).exists())
+		self.assertTrue(SavedPlayer.objects.filter(pk=active_player.pk).exists())
+		self.assertTrue(SavedPlayer.objects.filter(pk=saved_player.pk).exists())
 
 
 class WorkspaceLimitTests(TestCase):

@@ -3,7 +3,7 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.utils import timezone
 
-from tournaments.models import Tournament
+from tournaments.models import SavedPlayer, Tournament
 
 
 class Command(BaseCommand):
@@ -16,6 +16,7 @@ class Command(BaseCommand):
             deleted_tournaments, _ = Tournament.objects.filter(
                 workspace_key__in=workspace_keys,
             ).delete()
+            SavedPlayer.objects.filter(workspace_key__in=workspace_keys).delete()
             deleted_sessions, _ = expired_sessions.delete()
 
         self.stdout.write(
